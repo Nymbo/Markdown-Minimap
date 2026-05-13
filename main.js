@@ -112,6 +112,19 @@ class MinimapSettingTab extends PluginSettingTab {
                         this.plugin.saveSettings();
                     });
             });
+
+        new Setting(containerEl)
+            .setName("Reset to defaults")
+            .setDesc("Restore Markdown Minimap's default settings.")
+            .addButton((button) => {
+                button
+                    .setButtonText("Reset")
+                    .setWarning()
+                    .onClick(async () => {
+                        await this.plugin.resetSettings();
+                        this.display();
+                    });
+            });
     }
 }
 
@@ -254,17 +267,23 @@ class NoteMinimap extends Plugin {
     }
 
     async loadSettings() {
-        this.settings = Object.assign(
-            {
-                enabledByDefault: true,
-                betterRendering: true,
-                scale: 0.1,
-                minimapOpacity: 0.3,
-                sliderOpacity: 0.3,
-                topOffset: 0,
-            },
-            await this.loadData()
-        );
+        this.settings = Object.assign(this.getDefaultSettings(), await this.loadData());
+    }
+
+    getDefaultSettings() {
+        return {
+            enabledByDefault: true,
+            betterRendering: true,
+            scale: 0.1,
+            minimapOpacity: 0.3,
+            sliderOpacity: 0.3,
+            topOffset: 0,
+        };
+    }
+
+    async resetSettings() {
+        this.settings = this.getDefaultSettings();
+        await this.saveSettings();
     }
 
     async saveSettings() {

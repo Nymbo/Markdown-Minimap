@@ -1,5 +1,6 @@
 .minimap-frame {
     position: absolute;
+    right: var(--minimap-scrollbar-gutter, 14px);
     width: 100%;
     pointer-events: none;
     scale: var(--scale);
@@ -8,7 +9,7 @@
 }
 
 .minimap-slider {
-    right: 0;
+    right: var(--minimap-scrollbar-gutter, 14px);
     position: absolute;
     width: calc(100% * var(--scale));
     background-color: var(--code-comment);
@@ -23,14 +24,11 @@
     position: absolute;
     height: 100%;
     width: 100%;
+    pointer-events: none;
 }
 
-body:not(.native-scrollbars) ::-webkit-scrollbar {
-    display: none;
-}
-
-body:not(.native-scrollbars) .minimap-disabled ::-webkit-scrollbar {
-    display: block;
+.minimap-container .minimap-slider {
+    pointer-events: auto;
 }
 
 .minimap-disabled .minimap-container,
