@@ -1,11 +1,13 @@
 {
   "compilerOptions": {
+    "strict": true,
     "inlineSourceMap": true,
     "inlineSources": true,
     "module": "ESNext",
     "target": "ES2022",
     "allowJs": false,
     "noImplicitAny": false,
+    "strictPropertyInitialization": false,
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "strictNullChecks": false,

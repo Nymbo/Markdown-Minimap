@@ -949,21 +949,34 @@ export default NoteMinimap;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-function throttle(fn, limit, options = { leading: false, trailing: true }) {
+type ThrottleOptions = {
+    leading?: boolean;
+    trailing?: boolean;
+};
+
+function throttle<TArgs extends unknown[], TThis>(
+    fn: (this: TThis, ...args: TArgs) => void,
+    limit: number,
+    options: ThrottleOptions = { leading: false, trailing: true }
+) {
     let inThrottle = false;
-    let lastArgs, lastThis;
+    let lastArgs: TArgs | null = null;
+    let lastThis: TThis | null = null;
 
     const invoke = () => {
         if (lastArgs) {
-            fn.apply(lastThis, lastArgs);
-            lastArgs = lastThis = null;
+            const args = lastArgs;
+            const context = lastThis as TThis;
+            lastArgs = null;
+            lastThis = null;
+            fn.apply(context, args);
             setTimeout(invoke, limit);
         } else {
             inThrottle = false;
         }
     };
 
-    return function (...args) {
+    return function (this: TThis, ...args: TArgs) {
         if (!inThrottle) {
             if (options.leading) {
                 fn.apply(this, args);
