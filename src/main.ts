@@ -600,8 +600,6 @@ class Minimap {
         this.setHelperLeafId(helperLeafId);
         this.sourceView = element.querySelector(".markdown-source-view") as HTMLElement;
         this.modeChange();
-        this.updateSliderScroll = this.updateSliderScroll.bind(this);
-        this.onMinimapMouseDown = this.onMinimapMouseDown.bind(this);
 
         this.setupElements();
         this.updateSettings(settings);
@@ -807,7 +805,7 @@ class Minimap {
         void this.onResize();
     }
 
-    updateSliderScroll() {
+    updateSliderScroll = () => {
         if (!this.scroller) return;
         const metrics = this.getScrollMetrics();
         const minimapViewportTop =
@@ -828,7 +826,7 @@ class Minimap {
         this.slider.style.top = `${sliderTop}px`;
         this.slider.style.height = `${metrics.sliderHeight}px`;
         this.hitbox.style.height = `${metrics.activeHeight}px`;
-    }
+    };
 
     getScrollMetrics() {
         const scrollHeight = Math.max(
@@ -884,7 +882,7 @@ class Minimap {
         return await renderEditMode(this.helperElement, this.scroller);
     }
 
-    onMinimapMouseDown(e: MouseEvent) {
+    onMinimapMouseDown = (e: MouseEvent) => {
         e.preventDefault();
         this.isDragging = true;
         this.slider.classList.add("dragging");
@@ -893,7 +891,7 @@ class Minimap {
 
         activeDocument.addEventListener("mousemove", this.onSliderMouseMove);
         activeDocument.addEventListener("mouseup", this.onSliderMouseUp);
-    }
+    };
 
     onSliderMouseMove = (e: MouseEvent) => {
         if (!this.isDragging) return;
