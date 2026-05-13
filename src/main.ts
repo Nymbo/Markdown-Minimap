@@ -1083,6 +1083,11 @@ async function renderEditMode(
     }
 
     noteContent
+        .querySelectorAll<HTMLElement>(".markdown-minimap-force-render-scale")
+        .forEach((e) =>
+            e.classList.remove("markdown-minimap-force-render-scale")
+        );
+    noteContent
         .querySelectorAll<HTMLElement>(".cm-sizer")
         .forEach((e) => e.removeAttribute("style"));
 
