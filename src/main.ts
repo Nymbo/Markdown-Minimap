@@ -454,15 +454,24 @@ class NoteMinimap extends Plugin {
         // Avoid adding twice
         if (viewActions.querySelector(".minimap-toggle-button")) return;
 
-        const button = activeDocument.createElement("button");
-        button.className = "clickable-icon view-actions minimap-toggle-button";
-        button.setAttribute("aria-label", "Toggle Minimap");
+        const refreshButton = activeDocument.createElement("button");
+        refreshButton.className =
+            "clickable-icon view-actions minimap-refresh-button";
+        refreshButton.setAttribute("aria-label", "Refresh Minimap");
+        setIcon(refreshButton, "refresh-cw");
+
+        const toggleButton = activeDocument.createElement("button");
+        toggleButton.className = "clickable-icon view-actions minimap-toggle-button";
+        toggleButton.setAttribute("aria-label", "Toggle Minimap");
 
         // Use Obsidian's built-in icon
-        setIcon(button, "star-list");
+        setIcon(toggleButton, "star-list");
 
         const contentEl = leaf.view.contentEl;
-        button.onclick = () => {
+        refreshButton.onclick = () => {
+            void this.refreshMinimapForLeaf(leaf);
+        };
+        toggleButton.onclick = () => {
             contentEl.classList.toggle("minimap-disabled");
             void this.updateElementMinimap(contentEl);
         };
@@ -471,7 +480,30 @@ class NoteMinimap extends Plugin {
         if (!this.settings.enabledByDefault)
             contentEl.classList.add("minimap-disabled");
 
-        viewActions.prepend(button);
+        viewActions.prepend(toggleButton);
+        viewActions.prepend(refreshButton);
+    }
+
+    async refreshMinimapForLeaf(leaf: WorkspaceLeaf) {
+        const leafId = getLeafId(leaf);
+        if (!leafId || !(leaf.view instanceof MarkdownView)) return;
+
+        const contentEl = leaf.view.contentEl;
+        const existing = this.minimapInstances.get(contentEl);
+        if (existing) {
+            existing.destroy();
+            this.minimapInstances.delete(contentEl);
+            this.resizeObserver.unobserve(contentEl);
+        }
+
+        const helperLeafId = this.helperLeafIds.get(leafId);
+        if (helperLeafId) {
+            this.app.workspace.getLeafById(helperLeafId)?.detach();
+            this.helperLeafIds.delete(leafId);
+        }
+
+        await this.openHelperForLeaf(leaf);
+        await this.updateElementMinimap(contentEl, this.helperLeafIds.get(leafId));
     }
 
     isHelperLeaf(leaf: WorkspaceLeaf | null): boolean {
