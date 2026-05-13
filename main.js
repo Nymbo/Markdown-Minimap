@@ -699,18 +699,10 @@ class Minimap {
     }
 
     async getFullHTML() {
-        const file = this.getFile();
-        if (file) return await renderMarkdownFile(this.plugin, file);
-
-        return this.element.cloneNode(true);
-    }
-
-    getFile() {
-        const leaf = this.plugin.app.workspace
-            .getLeavesOfType("markdown")
-            .find((leaf) => leaf.view?.contentEl === this.element);
-
-        return leaf?.view?.file || null;
+        if (this.isReadModeActive()) {
+            return await renderReadMode(this.plugin, this.element);
+        }
+        return await renderEditMode(this.scroller);
     }
 
     onMinimapMouseDown(e) {
@@ -830,29 +822,47 @@ function toRGBAAlpha(color, alpha) {
     return color;
 }
 
-async function renderMarkdownFile(plugin, file) {
-    const structure = document.createElement("div");
-    structure.className = "view-content";
-
-    const readingView = document.createElement("div");
-    readingView.className = "markdown-reading-view";
-    structure.appendChild(readingView);
-
-    const previewView = document.createElement("div");
-    previewView.className = "markdown-preview-view markdown-rendered";
-    readingView.appendChild(previewView);
-
-    const destination = document.createElement("div");
-    destination.className = "markdown-preview-sizer";
-    previewView.appendChild(destination);
-
+async function renderReadMode(plugin, structureNode) {
+    const structure = structureNode.cloneNode(true);
+    structure
+        .querySelectorAll(".view-content > :not(.markdown-reading-view)")
+        .forEach((e) => e.remove());
+    const destination = structure.querySelector(".markdown-preview-sizer");
+    const titleElement = destination
+        .querySelector(".mod-header")
+        ?.cloneNode(true);
+    destination.innerHTML = "";
     await MarkdownRenderer.render(
         plugin.app,
-        await file.vault.read(file),
+        await plugin.app.workspace
+            .getActiveFile()
+            .vault.read(plugin.app.workspace.getActiveFile()),
         destination,
-        file.path,
+        plugin.app.workspace.getActiveFile().path,
         plugin
     );
-
+    if (titleElement)
+        destination.insertBefore(titleElement, destination.firstChild);
     return structure;
+}
+
+async function renderEditMode(scroller) {
+    const sizer = scroller.firstChild;
+    const element = scroller.parentElement.parentElement.parentElement;
+
+    sizer.style = "transform-origin: top right; scale: .1;";
+    element.offsetWidth;
+    await sleep(10);
+
+    const noteContent = element.cloneNode(true);
+    sizer.style = "";
+
+    noteContent.querySelectorAll(".cm-sizer").forEach((e) => (e.style = ""));
+
+    // Remove other content (fix for trouble with Editing Toolbar Plugin)
+    noteContent
+        .querySelectorAll(".markdown-source-view > :not(.cm-editor)")
+        .forEach((e) => e.remove());
+
+    return noteContent;
 }
