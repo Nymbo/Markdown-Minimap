@@ -17,7 +17,7 @@
 }
 
 .minimap-slider.dragging {
-    opacity: 0.5 !important;
+    opacity: 0.5;
 }
 
 .minimap-container {
@@ -45,7 +45,7 @@
 .minimap-disabled .minimap-frame,
 .minimap-disabled .minimap-slider,
 .minimap-disabled .minimap-hitbox {
-    display: none !important;
+    display: none;
 }
 
 .workspace-leaf.markdown-minimap-helper-leaf {

@@ -195,6 +195,15 @@ function asMinimapLeaf(this: void, leaf: WorkspaceLeaf | null): MinimapLeaf | nu
     return id ? (leaf as MinimapLeaf) : null;
 }
 
+function isSettingsObject(
+    this: void,
+    value: unknown
+): Partial<MarkdownMinimapSettings> {
+    return value && typeof value === "object"
+        ? (value as Partial<MarkdownMinimapSettings>)
+        : {};
+}
+
 class NoteMinimap extends Plugin {
     activeNoteView: MarkdownView | null = null;
     updateNeeded = false;
@@ -230,7 +239,7 @@ class NoteMinimap extends Plugin {
         this.modeObserver = new MutationObserver((entries) => {
             const entry = entries[0]; // all entries will be about the same topic anyways
             const noteInstance = this.minimapInstances.get(
-                entry.target.parentElement as HTMLElement
+                entry.target.parentElement
             );
             if (entry.attributeName === "style") noteInstance?.modeChange();
             void this.updateElementMinimap();
@@ -331,7 +340,11 @@ class NoteMinimap extends Plugin {
     }
 
     async loadSettings() {
-        this.settings = Object.assign(this.getDefaultSettings(), await this.loadData());
+        const savedSettings: unknown = await this.loadData();
+        this.settings = Object.assign(
+            this.getDefaultSettings(),
+            isSettingsObject(savedSettings)
+        );
     }
 
     getDefaultSettings() {
@@ -553,7 +566,7 @@ class NoteMinimap extends Plugin {
             .forEach((el) => {
                 el.classList.add("markdown-minimap-force-render-scale");
             });
-        const data = await view.getViewData();
+        const data = view.getViewData();
         view.clear();
         // Give Obsidian a frame to clear and remount the helper view before
         // writing the content back, which forces a full long-note render.
@@ -598,7 +611,9 @@ class Minimap {
         this.plugin = plugin;
         this.element = element;
         this.setHelperLeafId(helperLeafId);
-        this.sourceView = element.querySelector(".markdown-source-view") as HTMLElement;
+        const sourceView = element.querySelector<HTMLElement>(".markdown-source-view");
+        if (!sourceView) throw new Error("Markdown Minimap requires a source view.");
+        this.sourceView = sourceView;
         this.modeChange();
 
         this.setupElements();
@@ -940,7 +955,7 @@ class Minimap {
 export default NoteMinimap;
 
 const sleep = (ms: number) =>
-    new Promise<void>((resolve) => activeWindow.setTimeout(resolve, ms));
+    new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
 type ThrottleOptions = {
     leading?: boolean;
@@ -960,7 +975,7 @@ function throttle<TArgs extends unknown[]>(
             const args = lastArgs;
             lastArgs = null;
             fn(...args);
-            activeWindow.setTimeout(invoke, limit);
+            window.setTimeout(invoke, limit);
         } else {
             inThrottle = false;
         }
@@ -974,7 +989,7 @@ function throttle<TArgs extends unknown[]>(
                 lastArgs = args;
             }
             inThrottle = true;
-            activeWindow.setTimeout(invoke, limit);
+            window.setTimeout(invoke, limit);
         } else if (options.trailing) {
             lastArgs = args;
         }
@@ -1015,10 +1030,10 @@ async function renderReadMode(
     structure
         .querySelectorAll(".view-content > :not(.markdown-reading-view)")
         .forEach((e) => e.remove());
-    const destination = structure.querySelector(
+    const destination = structure.querySelector<HTMLElement>(
         ".markdown-preview-sizer"
     );
-    if (!(destination instanceof HTMLElement)) return structure;
+    if (!destination) return structure;
 
     const titleElement = destination
         .querySelector(".mod-header")
