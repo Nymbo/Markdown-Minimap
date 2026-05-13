@@ -205,6 +205,11 @@ class NoteMinimap extends Plugin {
         // Manage active leaf
         this.registerEvent(
             this.app.workspace.on("active-leaf-change", (newActiveLeaf) => {
+                if (this.isHelperLeaf(newActiveLeaf)) {
+                    newActiveLeaf.detach();
+                    return;
+                }
+
                 this.updateElementMinimap(); // old leaf
                 this.activeNoteView = newActiveLeaf.view;
                 // console.log(
@@ -215,6 +220,7 @@ class NoteMinimap extends Plugin {
 
                 // Toggle button
                 if (newActiveLeaf?.view?.getViewType() === "markdown") {
+                    this.openHelperForLeaf(newActiveLeaf);
                     this.addToggleButtonToLeaf(newActiveLeaf);
                 }
             })
@@ -235,6 +241,9 @@ class NoteMinimap extends Plugin {
         // This event does not provide arguments
         this.registerEvent(
             this.app.workspace.on("layout-change", () => {
+                this.detachRedundantHelperLeavesAndRestoreMissing();
+                this.updateHelpers();
+
                 // mode changes cause resizing since the height of the note contents changes
                 this.minimapInstances
                     .get(this.activeNoteView?.contentEl)
@@ -244,6 +253,7 @@ class NoteMinimap extends Plugin {
                 const openEls = new Set(
                     this.app.workspace
                         .getLeavesOfType("markdown")
+                        .filter((leaf) => !this.isHelperLeaf(leaf))
                         .map((l) => l.view.contentEl)
                 );
                 for (const [el, note] of this.minimapInstances.entries()) {
@@ -282,6 +292,7 @@ class NoteMinimap extends Plugin {
         document
             .querySelectorAll(".minimap-toggle-button")
             .forEach((button) => button.remove());
+        this.detachAllHelperLeaves();
 
         console.log("MarkdownMinimap Unloaded");
     }
@@ -321,12 +332,22 @@ class NoteMinimap extends Plugin {
     injectMinimapIntoAllNotes() {
         const leaves = this.app.workspace.getLeavesOfType("markdown");
         for (const leaf of leaves) {
+            if (this.isHelperLeaf(leaf)) continue;
+            this.openHelperForLeaf(leaf);
             this.addToggleButtonToLeaf(leaf);
-            this.updateElementMinimap(leaf.view.contentEl);
+            this.updateElementMinimap(
+                leaf.view.contentEl,
+                this.helperLeafIds.get(leaf.id)
+            );
         }
     }
 
-    async updateElementMinimap(element) {
+    async updateElementMinimap(element, helperLeafId) {
+        await sleep(100);
+        const activeLeaf = this.app.workspace.activeLeaf;
+        if (activeLeaf && !this.isHelperLeaf(activeLeaf))
+            helperLeafId = this.helperLeafIds.get(activeLeaf.id);
+
         // If no element is provided, use the active leaf
         if (!element) {
             if (!this.activeNoteView) return;
@@ -355,9 +376,15 @@ class NoteMinimap extends Plugin {
         // Update or create the Note instance for this element
         if (this.minimapInstances.has(element)) {
             const noteInstance = this.minimapInstances.get(element);
+            noteInstance.setHelperLeafId(helperLeafId);
             noteInstance.updateIframe();
         } else {
-            const minimapInstance = new Minimap(this, element, this.settings);
+            const minimapInstance = new Minimap(
+                this,
+                element,
+                this.settings,
+                helperLeafId
+            );
             this.minimapInstances.set(element, minimapInstance);
             this.resizeObserver.observe(element);
             this.modeObserver.observe(minimapInstance.sourceView, {
@@ -395,12 +422,107 @@ class NoteMinimap extends Plugin {
 
         viewActions.prepend(button);
     }
+
+    helperLeafIds = new Map();
+
+    isHelperLeaf(leaf) {
+        return !!leaf && [...this.helperLeafIds.values()].includes(leaf.id);
+    }
+
+    async openHelperForLeaf(leaf) {
+        if (!leaf || this.helperLeafIds.has(leaf.id) || this.isHelperLeaf(leaf))
+            return;
+        if (leaf.view?.getViewType() !== "markdown" || !leaf.view.file) return;
+
+        const rightLeaf = this.app.workspace.getRightLeaf(false);
+        this.helperLeafIds.set(leaf.id, rightLeaf.id);
+        await this.updateHelperForLeaf(leaf);
+        this.hideHelperLeaf(rightLeaf);
+    }
+
+    hideHelperLeaf(helperLeaf) {
+        const viewEl = helperLeaf?.view?.containerEl;
+        viewEl?.classList.add("markdown-minimap-helper-view");
+
+        const leafEl = viewEl?.closest(".workspace-leaf");
+        leafEl?.classList.add("markdown-minimap-helper-leaf");
+
+        const tabHeaderEl = helperLeaf?.tabHeaderEl;
+        tabHeaderEl?.classList?.add("markdown-minimap-helper-tab");
+    }
+
+    detachRedundantHelperLeavesAndRestoreMissing() {
+        this.helperLeafIds.forEach((helperLeafId, originalLeafId) => {
+            const originalLeaf = this.app.workspace.getLeafById(originalLeafId);
+            const helperLeaf = this.app.workspace.getLeafById(helperLeafId);
+
+            if (originalLeaf) {
+                if (helperLeaf) {
+                    this.hideHelperLeaf(helperLeaf);
+                } else {
+                    this.helperLeafIds.delete(originalLeafId);
+                    this.openHelperForLeaf(originalLeaf);
+                }
+            } else {
+                helperLeaf?.detach();
+                this.helperLeafIds.delete(originalLeafId);
+            }
+        });
+    }
+
+    detachAllHelperLeaves() {
+        this.helperLeafIds.forEach((helperLeafId) => {
+            this.app.workspace.getLeafById(helperLeafId)?.detach();
+        });
+        this.helperLeafIds.clear();
+    }
+
+    updateHelpers = throttle(() => {
+        this.app.workspace
+            .getLeavesOfType("markdown")
+            .filter((leaf) => !this.isHelperLeaf(leaf))
+            .forEach((leaf) => {
+                this.updateHelperForLeaf(leaf);
+            });
+        this.updateElementMinimap();
+    }, 500);
+
+    async updateHelperForLeaf(leaf) {
+        const helperLeaf = this.app.workspace.getLeafById(
+            this.helperLeafIds.get(leaf?.id)
+        );
+        if (!helperLeaf) return;
+
+        const oldState = helperLeaf.view.getState();
+        const newState = leaf.view.getState();
+        await helperLeaf.setViewState({
+            type: "markdown",
+            state: newState,
+        });
+        this.hideHelperLeaf(helperLeaf);
+        if (oldState.file !== newState.file)
+            await this.initialForceloadContentInMarkdownView(helperLeaf.view);
+    }
+
+    async initialForceloadContentInMarkdownView(view) {
+        if (view?.getViewType() !== "markdown") return;
+        view.contentEl
+            .querySelectorAll(".markdown-preview-sizer, .cm-sizer")
+            .forEach((el) => {
+                el.style = "transform-origin: top right; scale: .1;";
+            });
+        const data = await view.getViewData();
+        await view.clear();
+        await sleep(100);
+        await view.setViewData(data);
+    }
 }
 
 class Minimap {
-    constructor(plugin, element, settings) {
+    constructor(plugin, element, settings, helperLeafId) {
         this.plugin = plugin;
         this.element = element;
+        this.setHelperLeafId(helperLeafId);
         this.sourceView = element.querySelector(".markdown-source-view");
         this.modeChange();
         this.updateSliderScroll = this.updateSliderScroll.bind(this);
@@ -446,6 +568,12 @@ class Minimap {
         this.updateSliderScroll = this.updateSliderScroll.bind(this);
         this.onMinimapMouseDown = this.onMinimapMouseDown.bind(this);
         this.changeScroller(scroller);
+    }
+
+    setHelperLeafId(helperLeafId) {
+        this.helperLeafId = helperLeafId;
+        this.helperElement =
+            this.plugin.app.workspace.getLeafById(helperLeafId)?.view?.contentEl;
     }
 
     updateSettings(settings) {
@@ -702,7 +830,7 @@ class Minimap {
         if (this.isReadModeActive()) {
             return await renderReadMode(this.plugin, this.element);
         }
-        return await renderEditMode(this.scroller);
+        return await renderEditMode(this.helperElement, this.scroller);
     }
 
     onMinimapMouseDown(e) {
@@ -846,16 +974,21 @@ async function renderReadMode(plugin, structureNode) {
     return structure;
 }
 
-async function renderEditMode(scroller) {
-    const sizer = scroller.firstChild;
-    const element = scroller.parentElement.parentElement.parentElement;
+async function renderEditMode(helperElement, scroller) {
+    let noteContent;
+    if (helperElement) {
+        noteContent = helperElement.cloneNode(true);
+    } else {
+        const sizer = scroller.firstChild;
+        const element = scroller.parentElement.parentElement.parentElement;
 
-    sizer.style = "transform-origin: top right; scale: .1;";
-    element.offsetWidth;
-    await sleep(10);
+        sizer.style = "transform-origin: top right; scale: .1;";
+        element.offsetWidth;
+        await sleep(10);
 
-    const noteContent = element.cloneNode(true);
-    sizer.style = "";
+        noteContent = element.cloneNode(true);
+        sizer.style = "";
+    }
 
     noteContent.querySelectorAll(".cm-sizer").forEach((e) => (e.style = ""));
 
