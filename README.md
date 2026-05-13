@@ -57,7 +57,10 @@ git clone https://github.com/Nymbo/Markdown-Minimap .obsidian/plugins/markdown-m
 - Adjustable minimap scale
 - Enable minimap by default
 - Opacity (separate for minimap and slider)
-- Top offset (for custom toolbars in the note)
+- Top and bottom offsets (for custom toolbars, status bars, or bottom chrome)
+- Scrollbar gap
+- Minimum viewport highlight height
+- Center-on-click behavior
 - Rendering methods
 
 ## ℹ️ About Better Rendering
@@ -67,7 +70,6 @@ Better Rendering should significantly improve the consistency of fully loading t
 
 ## 📌 Limitations
 
-- Not optimized for extremely large notes yet
 - Uses workaround to render long notes because of Obsidian's lazy loading  
 
 ## 💡 Ideas and Contributions

@@ -30,9 +30,11 @@
 
 .minimap-hitbox {
     position: absolute;
-    top: 0;
+    top: var(--minimap-top-offset, 0px);
     right: var(--minimap-scrollbar-gutter, 14px);
-    height: 100%;
+    height: calc(
+        100% - var(--minimap-top-offset, 0px) - var(--minimap-bottom-offset, 0px)
+    );
     width: calc(100% * var(--scale));
     pointer-events: auto;
     z-index: 3;

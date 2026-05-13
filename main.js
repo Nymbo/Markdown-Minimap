@@ -114,6 +114,66 @@ class MinimapSettingTab extends PluginSettingTab {
             });
 
         new Setting(containerEl)
+            .setName("Bottom Offset")
+            .setDesc(
+                "Offset the minimap from the bottom (pixels) - for status bars or bottom chrome"
+            )
+            .addSlider((slider) => {
+                slider
+                    .setLimits(0, 100, 1)
+                    .setValue(this.plugin.settings.bottomOffset)
+                    .setDynamicTooltip()
+                    .onChange((value) => {
+                        this.plugin.settings.bottomOffset = value;
+                        this.plugin.saveSettings();
+                    });
+            });
+
+        new Setting(containerEl)
+            .setName("Scrollbar Gap")
+            .setDesc(
+                "Distance between the minimap and the regular editor scrollbar (pixels)"
+            )
+            .addSlider((slider) => {
+                slider
+                    .setLimits(0, 32, 1)
+                    .setValue(this.plugin.settings.scrollbarGutter)
+                    .setDynamicTooltip()
+                    .onChange((value) => {
+                        this.plugin.settings.scrollbarGutter = value;
+                        this.plugin.saveSettings();
+                    });
+            });
+
+        new Setting(containerEl)
+            .setName("Minimum Viewport Height")
+            .setDesc(
+                "Minimum height for the visible viewport highlight (pixels)"
+            )
+            .addSlider((slider) => {
+                slider
+                    .setLimits(8, 80, 1)
+                    .setValue(this.plugin.settings.minViewportHeight)
+                    .setDynamicTooltip()
+                    .onChange((value) => {
+                        this.plugin.settings.minViewportHeight = value;
+                        this.plugin.saveSettings();
+                    });
+            });
+
+        new Setting(containerEl)
+            .setName("Center on Click")
+            .setDesc("Center the editor viewport around the clicked minimap position")
+            .addToggle((toggle) => {
+                toggle
+                    .setValue(this.plugin.settings.centerOnClick)
+                    .onChange((value) => {
+                        this.plugin.settings.centerOnClick = value;
+                        this.plugin.saveSettings();
+                    });
+            });
+
+        new Setting(containerEl)
             .setName("Reset to defaults")
             .setDesc("Restore Markdown Minimap's default settings.")
             .addButton((button) => {
@@ -278,6 +338,10 @@ class NoteMinimap extends Plugin {
             minimapOpacity: 0.3,
             sliderOpacity: 0.3,
             topOffset: 0,
+            bottomOffset: 0,
+            scrollbarGutter: 14,
+            minViewportHeight: 24,
+            centerOnClick: true,
         };
     }
 
@@ -526,6 +590,10 @@ class Minimap {
         this.minimapOpacity = settings.minimapOpacity;
         this.sliderOpacity = settings.sliderOpacity;
         this.topOffset = settings.topOffset;
+        this.bottomOffset = settings.bottomOffset;
+        this.scrollbarGutter = settings.scrollbarGutter;
+        this.minViewportHeight = settings.minViewportHeight;
+        this.centerOnClick = settings.centerOnClick;
 
         this.backgroundColor = toRGBAAlpha(
             document
@@ -545,6 +613,20 @@ class Minimap {
     updateSettingsInCSS() {
         if (this.container)
             this.container.style.setProperty("--scale", this.scale);
+        if (this.container) {
+            this.container.style.setProperty(
+                "--minimap-top-offset",
+                `${this.topOffset || 0}px`
+            );
+            this.container.style.setProperty(
+                "--minimap-bottom-offset",
+                `${this.bottomOffset || 0}px`
+            );
+            this.container.style.setProperty(
+                "--minimap-scrollbar-gutter",
+                `${this.scrollbarGutter || 0}px`
+            );
+        }
         if (this.iframe) this.iframe.style.setProperty("--scale", this.scale);
         if (this.slider) this.slider.style.setProperty("--scale", this.scale);
         if (this.hitbox) this.hitbox.style.setProperty("--scale", this.scale);
@@ -712,7 +794,9 @@ class Minimap {
         );
         const availableHeight = Math.max(
             1,
-            (this.container?.clientHeight || clientHeight) - (this.topOffset || 0)
+            (this.container?.clientHeight || clientHeight) -
+                (this.topOffset || 0) -
+                (this.bottomOffset || 0)
         );
         const scaledDocumentHeight = Math.max(1, scrollHeight * this.scale);
         const maxMinimapScroll = Math.max(
@@ -722,7 +806,7 @@ class Minimap {
         const scrollRatio = maxScroll > 0 ? scrollTop / maxScroll : 0;
         const minimapScrollOffset = maxMinimapScroll * scrollRatio;
         const sliderHeight = Math.max(
-            24,
+            this.minViewportHeight || 24,
             Math.min(availableHeight, clientHeight * this.scale)
         );
 
@@ -754,7 +838,7 @@ class Minimap {
         this.isDragging = true;
         this.slider.classList.add("dragging");
 
-        this.scrollToMinimapClientY(e.clientY, true);
+        this.scrollToMinimapClientY(e.clientY, this.centerOnClick);
 
         document.addEventListener("mousemove", this.onSliderMouseMove);
         document.addEventListener("mouseup", this.onSliderMouseUp);
@@ -762,7 +846,7 @@ class Minimap {
 
     onSliderMouseMove = (e) => {
         if (!this.isDragging) return;
-        this.scrollToMinimapClientY(e.clientY, true);
+        this.scrollToMinimapClientY(e.clientY, this.centerOnClick);
     };
 
     scrollToMinimapClientY(clientY, centerViewport = false) {
