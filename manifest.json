@@ -5,6 +5,6 @@
     "description": "Add a minimap to your Markdown notes.",
 
     "minAppVersion": "1.8.10",
-    "version": "0.0.6",
+    "version": "0.0.7",
     "isDesktopOnly": false
 }
