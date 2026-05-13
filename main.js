@@ -771,7 +771,7 @@ class Minimap {
                 0,
                 Math.min(
                     minimapViewportTop,
-                    Math.max(0, metrics.availableHeight - metrics.sliderHeight)
+                    Math.max(0, metrics.activeHeight - metrics.sliderHeight)
                 )
             );
 
@@ -780,6 +780,7 @@ class Minimap {
         }px`;
         this.slider.style.top = `${sliderTop}px`;
         this.slider.style.height = `${metrics.sliderHeight}px`;
+        this.hitbox.style.height = `${metrics.activeHeight}px`;
     }
 
     getScrollMetrics() {
@@ -801,16 +802,18 @@ class Minimap {
                 (this.bottomOffset || 0)
         );
         const scaledDocumentHeight = Math.max(1, scrollHeight * this.scale);
+        const rawActiveHeight = Math.min(availableHeight, scaledDocumentHeight);
+        const sliderHeight = Math.max(
+            this.minViewportHeight || 24,
+            Math.min(rawActiveHeight, clientHeight * this.scale)
+        );
+        const activeHeight = Math.max(rawActiveHeight, sliderHeight);
         const maxMinimapScroll = Math.max(
             0,
-            scaledDocumentHeight - availableHeight
+            scaledDocumentHeight - activeHeight
         );
         const scrollRatio = maxScroll > 0 ? scrollTop / maxScroll : 0;
         const minimapScrollOffset = maxMinimapScroll * scrollRatio;
-        const sliderHeight = Math.max(
-            this.minViewportHeight || 24,
-            Math.min(availableHeight, clientHeight * this.scale)
-        );
 
         return {
             scrollHeight,
@@ -818,6 +821,7 @@ class Minimap {
             maxScroll,
             scrollTop,
             availableHeight,
+            activeHeight,
             scaledDocumentHeight,
             maxMinimapScroll,
             scrollRatio,
@@ -858,7 +862,7 @@ class Minimap {
             0,
             Math.min(
                 clientY - rect.top - (this.topOffset || 0),
-                metrics.availableHeight
+                metrics.activeHeight
             )
         );
         const targetY = centerViewport
@@ -867,7 +871,7 @@ class Minimap {
         const scrollRatio = Math.max(
             0,
             Math.min(
-                targetY / Math.max(1, metrics.availableHeight - metrics.sliderHeight),
+                targetY / Math.max(1, metrics.activeHeight - metrics.sliderHeight),
                 1
             )
         );
