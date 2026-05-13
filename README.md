@@ -66,6 +66,17 @@ git clone https://github.com/Nymbo/Markdown-Minimap .obsidian/plugins/markdown-m
 
 - Uses workaround to render long notes because of Obsidian's lazy loading  
 
+## Development
+
+Markdown Minimap is built from TypeScript source in `src/main.ts`.
+
+```bash
+npm install
+npm run build
+```
+
+Use `npm run dev` to watch and rebuild `main.js` during local development.
+
 ## 💡 Ideas and Contributions
 
 Contributions, bug reports, and feature requests are welcome!  

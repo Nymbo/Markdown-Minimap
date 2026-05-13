@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 const requiredFiles = [
+  "src/main.ts",
   "main.js",
   "manifest.json",
   "styles.css",

@@ -1,6 +1,6 @@
 {
   "name": "markdown-minimap",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Add a minimap to your Markdown notes.",
   "author": "Nymbo",
   "main": "main.js",
@@ -14,8 +14,16 @@
   "homepage": "https://github.com/Nymbo/Markdown-Minimap#readme",
   "license": "MIT",
   "scripts": {
-    "build": "node scripts/validate-build.mjs",
-    "lint": "node scripts/validate-build.mjs"
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && node scripts/validate-build.mjs",
+    "lint": "tsc -noEmit -skipLibCheck && node scripts/validate-build.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.25.4",
+    "obsidian": "^1.8.7",
+    "typescript": "^5.8.3"
   },
   "keywords": [
     "obsidian",
