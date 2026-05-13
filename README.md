@@ -61,12 +61,6 @@ git clone https://github.com/Nymbo/Markdown-Minimap .obsidian/plugins/markdown-m
 - Scrollbar gap
 - Minimum viewport highlight height
 - Center-on-click behavior
-- Rendering methods
-
-## ℹ️ About Better Rendering
-
-The new rendering method is using a semi-hidden note to get the full Markdown render. This is required because of Obsidian's (always on) lazy loading, and is can be noticed only by seeing the extra tabs in the right panel - those cannot be opened or closed manually, and instead are handled by the plugin.
-Better Rendering should significantly improve the consistency of fully loading the note, and it solves the flickering issue that was encountered by some.
 
 ## 📌 Limitations
 

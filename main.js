@@ -6,7 +6,6 @@ const {
     Setting,
     PluginSettingTab,
     MarkdownRenderer,
-    Notice,
 } = require("obsidian");
 
 class MinimapSettingTab extends PluginSettingTab {
@@ -29,29 +28,6 @@ class MinimapSettingTab extends PluginSettingTab {
                     .onChange((value) => {
                         this.plugin.settings.enabledByDefault = value;
                         this.plugin.saveSettings();
-                    });
-            });
-
-        new Setting(containerEl)
-            .setName("Better Rendering (in development)")
-            .setDesc(
-                "Use a hidden helper note to render the minimap, improving flickering and consistent loading. Changing this will trigger a plugin restart"
-            )
-            .addToggle((toggle) => {
-                toggle
-                    .setValue(this.plugin.settings.betterRendering)
-                    .onChange(async (value) => {
-                        this.plugin.settings.betterRendering = value;
-                        await this.plugin.saveSettings();
-
-                        // Restart plugin to apply changes
-                        await this.app.plugins.disablePlugin("markdown-minimap");
-                        await this.app.plugins.enablePlugin("markdown-minimap");
-                        this.app.setting.openTabById("markdown-minimap");
-                        new Notice(
-                            "Markdown Minimap: Restarted plugin for Better Rendering change.",
-                            3000
-                        );
                     });
             });
 
@@ -229,7 +205,6 @@ class NoteMinimap extends Plugin {
         // Manage active leaf
         this.registerEvent(
             this.app.workspace.on("active-leaf-change", (newActiveLeaf) => {
-                this.checkAndDealWithUserOpeningHelperLeaves(newActiveLeaf);
                 this.updateElementMinimap(); // old leaf
                 this.activeNoteView = newActiveLeaf.view;
                 // console.log(
@@ -240,8 +215,6 @@ class NoteMinimap extends Plugin {
 
                 // Toggle button
                 if (newActiveLeaf?.view?.getViewType() === "markdown") {
-                    if (this.settings.betterRendering)
-                        this.openHelperForLeaf(newActiveLeaf);
                     this.addToggleButtonToLeaf(newActiveLeaf);
                 }
             })
@@ -259,21 +232,9 @@ class NoteMinimap extends Plugin {
             this.app.workspace.on("editor-change", this.debouncedUpdateMinimap)
         );
 
-        // mode changes for better rendering
-        const updateHelpers = throttle(() => {
-            this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
-                this.updateHelperForLeaf(leaf);
-            });
-            this.updateElementMinimap();
-        }, 500);
         // This event does not provide arguments
         this.registerEvent(
             this.app.workspace.on("layout-change", () => {
-                if (this.settings.betterRendering) {
-                    this.detachRedundantHelperLeavesAndRestoreMissing();
-                    updateHelpers();
-                }
-
                 // mode changes cause resizing since the height of the note contents changes
                 this.minimapInstances
                     .get(this.activeNoteView?.contentEl)
@@ -321,7 +282,6 @@ class NoteMinimap extends Plugin {
         document
             .querySelectorAll(".minimap-toggle-button")
             .forEach((button) => button.remove());
-        this.detachAllHelperLeaves();
 
         console.log("MarkdownMinimap Unloaded");
     }
@@ -333,7 +293,6 @@ class NoteMinimap extends Plugin {
     getDefaultSettings() {
         return {
             enabledByDefault: true,
-            betterRendering: true,
             scale: 0.1,
             minimapOpacity: 0.3,
             sliderOpacity: 0.3,
@@ -362,19 +321,12 @@ class NoteMinimap extends Plugin {
     injectMinimapIntoAllNotes() {
         const leaves = this.app.workspace.getLeavesOfType("markdown");
         for (const leaf of leaves) {
-            if (this.settings.betterRendering) this.openHelperForLeaf(leaf);
             this.addToggleButtonToLeaf(leaf);
-            this.updateElementMinimap(
-                leaf.view.contentEl,
-                this.helperLeafIds.get(leaf.id)
-            );
+            this.updateElementMinimap(leaf.view.contentEl);
         }
     }
 
-    async updateElementMinimap(element, helperLeafId) {
-        await sleep(100); // wait for helper to open
-        const activeLeaf = this.app.workspace.activeLeaf;
-        helperLeafId = this.helperLeafIds.get(activeLeaf.id);
+    async updateElementMinimap(element) {
         // If no element is provided, use the active leaf
         if (!element) {
             if (!this.activeNoteView) return;
@@ -405,12 +357,7 @@ class NoteMinimap extends Plugin {
             const noteInstance = this.minimapInstances.get(element);
             noteInstance.updateIframe();
         } else {
-            const minimapInstance = new Minimap(
-                this,
-                element,
-                this.settings,
-                helperLeafId
-            );
+            const minimapInstance = new Minimap(this, element, this.settings);
             this.minimapInstances.set(element, minimapInstance);
             this.resizeObserver.observe(element);
             this.modeObserver.observe(minimapInstance.sourceView, {
@@ -448,96 +395,12 @@ class NoteMinimap extends Plugin {
 
         viewActions.prepend(button);
     }
-
-    // Functions towards switching to rendering minimap with a helper leaf instead of the actual - to improve use experience
-    helperLeafIds = new Map(); // originalLeafId: helperLeafId
-    async openHelperForLeaf(leaf) {
-        if (!leaf) return;
-        if (this.helperLeafIds.has(leaf.id)) return; // already has a helper
-        if ([...this.helperLeafIds.values()].includes(leaf.id)) return; // is a helper itself
-        // if (leaf.view?.getViewType() !== "markdown") return;
-        const file = leaf.view.file;
-        if (!file) return;
-
-        // Create the helper leaf in the right sidebar, save its id and open the same content in it
-        const rightLeaf = this.app.workspace.getRightLeaf(false);
-        this.helperLeafIds.set(leaf.id, rightLeaf.id);
-        this.updateHelperForLeaf(leaf);
-        // console.log(`Opened helper leaf ${rightLeaf.id} for original leaf ${leaf.id}`);
-    }
-    detachRedundantHelperLeavesAndRestoreMissing() {
-        this.helperLeafIds.forEach((helperLeafId, originalLeafId) => {
-            if (this.app.workspace.getLeafById(originalLeafId)) {
-                // original leaf exists - assert helper leaf exists
-                if (!this.app.workspace.getLeafById(helperLeafId)) {
-                    this.helperLeafIds.delete(originalLeafId);
-                    // console.log(`Restoring missing helper leaf ${helperLeafId} for original leaf ${originalLeafId}`);
-                    const originalLeaf =
-                        this.app.workspace.getLeafById(originalLeafId);
-                    this.openHelperForLeaf(originalLeaf);
-                    new Notice(
-                        "Markdown Minimap: This is a helper note used for Better Rendering - avoid touching it!",
-                        4000
-                    );
-                }
-            } else {
-                const helperLeaf = this.app.workspace.getLeafById(helperLeafId);
-                if (helperLeaf) {
-                    // console.log(`Closing helper leaf ${helperLeafId} as original leaf ${originalLeafId} has closed`);
-                    helperLeaf.detach();
-                }
-                this.helperLeafIds.delete(originalLeafId);
-            }
-        });
-    }
-    checkAndDealWithUserOpeningHelperLeaves(newActiveLeaf) {
-        // No need to scold the user here since detaching the leaf will trigger it
-        if ([...this.helperLeafIds.values()].includes(newActiveLeaf.id))
-            newActiveLeaf.detach();
-    }
-    detachAllHelperLeaves() {
-        this.helperLeafIds.forEach((helperLeafId) => {
-            this.app.workspace.getLeafById(helperLeafId)?.detach();
-        });
-    }
-    async updateHelperForLeaf(leaf) {
-        const helperLeaf = this.app.workspace.getLeafById(
-            this.helperLeafIds.get(leaf?.id)
-        );
-        if (!helperLeaf) return;
-        // console.log("Updating helper for leaf", leaf.id);
-
-        const oldState = helperLeaf.view.getState();
-        const newState = leaf.view.getState();
-        await helperLeaf.setViewState({
-            type: "markdown",
-            state: newState,
-        });
-        if (oldState.file !== newState.file)
-            await this.initialForceloadContentInMarkdownView(helperLeaf.view);
-    }
-    async initialForceloadContentInMarkdownView(view) {
-        // Force the contentEl to fully load by clearing and restoring its data - I don't know why view.clear() is the only thing that works...
-        if (view?.getViewType() !== "markdown") return;
-        view.contentEl
-            .querySelectorAll(".markdown-preview-sizer, .cm-sizer")
-            .forEach((el) => {
-                el.style = "transform-origin: top right; scale: .1;";
-            });
-        const data = await view.getViewData();
-        await view.clear();
-        await sleep(100);
-        await view.setViewData(data);
-    }
 }
 
 class Minimap {
-    constructor(plugin, element, settings, helperLeafId) {
+    constructor(plugin, element, settings) {
         this.plugin = plugin;
         this.element = element;
-        this.helperLeafId = helperLeafId;
-        this.helperElement =
-            plugin.app.workspace.getLeafById(helperLeafId)?.view?.contentEl;
         this.sourceView = element.querySelector(".markdown-source-view");
         this.modeChange();
         this.updateSliderScroll = this.updateSliderScroll.bind(this);
@@ -824,13 +687,19 @@ class Minimap {
         };
     }
 
-    // Needed since obsidian doesn't load non-visible parts of the note (can't be changed).
     async getFullHTML() {
-        if (this.isReadModeActive()) {
-            // We can just use MarkdownRenderer.render() directly to load all content
-            return await renderReadMode(this.plugin, this.element);
-        }
-        return await renderEditMode(this.helperElement, this.scroller);
+        const file = this.getFile();
+        if (file) return await renderMarkdownFile(this.plugin, file);
+
+        return this.element.cloneNode(true);
+    }
+
+    getFile() {
+        const leaf = this.plugin.app.workspace
+            .getLeavesOfType("markdown")
+            .find((leaf) => leaf.view?.contentEl === this.element);
+
+        return leaf?.view?.file || null;
     }
 
     onMinimapMouseDown(e) {
@@ -950,52 +819,29 @@ function toRGBAAlpha(color, alpha) {
     return color;
 }
 
-async function renderReadMode(plugin, structureNode) {
-    const structure = structureNode.cloneNode(true);
-    structure
-        .querySelectorAll(".view-content > :not(.markdown-reading-view)")
-        .forEach((e) => e.remove());
-    const destination = structure.querySelector(".markdown-preview-sizer");
-    const titleElement = destination
-        .querySelector(".mod-header")
-        ?.cloneNode(true);
-    destination.innerHTML = ""; // clear existing content
+async function renderMarkdownFile(plugin, file) {
+    const structure = document.createElement("div");
+    structure.className = "view-content";
+
+    const readingView = document.createElement("div");
+    readingView.className = "markdown-reading-view";
+    structure.appendChild(readingView);
+
+    const previewView = document.createElement("div");
+    previewView.className = "markdown-preview-view markdown-rendered";
+    readingView.appendChild(previewView);
+
+    const destination = document.createElement("div");
+    destination.className = "markdown-preview-sizer";
+    previewView.appendChild(destination);
+
     await MarkdownRenderer.render(
         plugin.app,
-        await plugin.app.workspace
-            .getActiveFile()
-            .vault.read(plugin.app.workspace.getActiveFile()),
+        await file.vault.read(file),
         destination,
-        plugin.app.workspace.getActiveFile().path,
+        file.path,
         plugin
     );
-    if (titleElement)
-        destination.insertBefore(titleElement, destination.firstChild);
+
     return structure;
-}
-async function renderEditMode(helperElement, scroller) {
-    let noteContent;
-    if (helperElement) {
-        // Better Rendering: use helper note if available
-        noteContent = helperElement.cloneNode(true);
-    } else {
-        const sizer = scroller.firstChild;
-        const element = scroller.parentElement.parentElement.parentElement;
-        // Fallback: use current note but try to force full rendering
-        sizer.style = "transform-origin: top right; scale: .1;";
-        element.offsetWidth; // trigger reflow
-        await sleep(10);
-
-        noteContent = element.cloneNode(true);
-        sizer.style = "";
-    }
-
-    noteContent.querySelectorAll(".cm-sizer").forEach((e) => (e.style = ""));
-
-    // Remove other content (fix for trouble with Editing Toolbar Plugin)
-    noteContent
-        .querySelectorAll(".markdown-source-view > :not(.cm-editor)")
-        .forEach((e) => e.remove());
-
-    return noteContent;
 }
