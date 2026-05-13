@@ -71,3 +71,8 @@
     opacity: 0 !important;
     pointer-events: none !important;
 }
+
+.markdown-minimap-force-render-scale {
+    transform-origin: top right;
+    scale: .1;
+}
