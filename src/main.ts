@@ -179,18 +179,16 @@ interface MarkdownMinimapSettings {
 }
 
 class NoteMinimap extends Plugin {
-    activeNoteView: any = null;
+    activeNoteView: MarkdownView | null = null;
     updateNeeded = false;
     minimapInstances = new Map<HTMLElement, Minimap>(); // element: noteInstance
     resizeObserver!: ResizeObserver;
     modeObserver!: MutationObserver;
-    debouncedUpdateMinimap: any;
+    debouncedUpdateMinimap: ReturnType<typeof debounce>;
     settings!: MarkdownMinimapSettings;
     helperLeafIds = new Map<string, string>();
 
     async onload() {
-        console.log("MarkdownMinimap Loaded");
-
         // Handle resize
         const resized = new Set(); // entry.target = element
         const resize = throttle(() => {
@@ -230,11 +228,10 @@ class NoteMinimap extends Plugin {
                 }
 
                 this.updateElementMinimap(); // old leaf
-                this.activeNoteView = newActiveLeaf.view;
-                // console.log(
-                //     "Active leaf changed, current active view:",
-                //     this.activeNoteView
-                // );
+                this.activeNoteView =
+                    newActiveLeaf?.view instanceof MarkdownView
+                        ? newActiveLeaf.view
+                        : null;
                 this.updateElementMinimap(); // new leaf
 
                 // Toggle button
@@ -277,7 +274,6 @@ class NoteMinimap extends Plugin {
                 );
                 for (const [el, note] of this.minimapInstances.entries()) {
                     if (!openEls.has(el)) {
-                        // console.log("note closed", el);
                         note.destroy();
                         this.minimapInstances.delete(el);
                         this.resizeObserver.unobserve(el);
@@ -313,7 +309,6 @@ class NoteMinimap extends Plugin {
             .forEach((button) => button.remove());
         this.detachAllHelperLeaves();
 
-        console.log("MarkdownMinimap Unloaded");
     }
 
     async loadSettings() {
@@ -362,6 +357,8 @@ class NoteMinimap extends Plugin {
     }
 
     async updateElementMinimap(element?: HTMLElement, helperLeafId?: string) {
+        // Wait for Obsidian to finish applying leaf/view changes before
+        // reading editor DOM state. No equivalent settled event exists.
         await sleep(100);
         const activeLeaf: any = this.app.workspace.activeLeaf;
         if (activeLeaf && !this.isHelperLeaf(activeLeaf))
@@ -409,7 +406,6 @@ class NoteMinimap extends Plugin {
             this.modeObserver.observe(minimapInstance.sourceView, {
                 attributes: true,
             });
-            // console.log("Created new Note instance for leaf:", element);
         }
     }
 
@@ -526,10 +522,12 @@ class NoteMinimap extends Plugin {
         view.contentEl
             .querySelectorAll(".markdown-preview-sizer, .cm-sizer")
             .forEach((el) => {
-                el.style = "transform-origin: top right; scale: .1;";
+                el.style.cssText = "transform-origin: top right; scale: .1;";
             });
         const data = await view.getViewData();
         await view.clear();
+        // Give Obsidian a frame to clear and remount the helper view before
+        // writing the content back, which forces a full long-note render.
         await sleep(100);
         await view.setViewData(data);
     }
@@ -583,41 +581,6 @@ class Minimap {
         this.scroller.addEventListener("scroll", this.updateSliderScroll);
         this.hitbox.addEventListener("mousedown", this.onMinimapMouseDown);
     }
-    _constructor(viewContent, scroller, settings) {
-        this.viewContent = viewContent;
-        this.updateSettings(settings);
-        this.updateSettingsInCSS();
-
-        // Create minimap elements
-        this.container = document.createElement("div");
-        this.container.className = "minimap-container";
-
-        this.iframe = document.createElement("iframe");
-        this.iframe.className = "minimap-frame";
-        this.container.appendChild(this.iframe);
-
-        this.slider = document.createElement("div");
-        this.slider.className = "minimap-slider";
-        this.container.appendChild(this.slider);
-
-        this.hitbox = document.createElement("div");
-        this.hitbox.className = "minimap-hitbox";
-        this.container.appendChild(this.hitbox);
-
-        // Append minimap to note
-        this.viewContent
-            .querySelectorAll(
-                ".minimap-container, .minimap-frame, .minimap-slider, .minimap-hitbox"
-            )
-            .forEach((e) => e.remove());
-        this.viewContent.prepend(this.container);
-
-        //
-        this.updateSliderScroll = this.updateSliderScroll.bind(this);
-        this.onMinimapMouseDown = this.onMinimapMouseDown.bind(this);
-        this.changeScroller(scroller);
-    }
-
     setHelperLeafId(helperLeafId?: string) {
         this.helperLeafId = helperLeafId;
         this.helperElement =
@@ -637,12 +600,13 @@ class Minimap {
         this.minViewportHeight = settings.minViewportHeight;
         this.centerOnClick = settings.centerOnClick;
 
-        this.backgroundColor = toRGBAAlpha(
-            document
-                .querySelector(".view-content")!
-                .getCssPropertyValue("background-color"),
-            this.minimapOpacity
-        );
+        const viewContent = document.querySelector(".view-content");
+        this.backgroundColor = viewContent
+            ? toRGBAAlpha(
+                  (viewContent as any).getCssPropertyValue("background-color"),
+                  this.minimapOpacity
+              )
+            : "transparent";
 
         if (this.iframe && this.slider) {
             this.updateSettingsInCSS();
@@ -681,13 +645,15 @@ class Minimap {
         document.removeEventListener("mousemove", this.onSliderMouseMove);
         document.removeEventListener("mouseup", this.onSliderMouseUp);
 
+        if (this.iframe) {
+            this.iframe.onload = null;
+        }
         this.container.remove();
 
         this.container = null;
         this.iframe = null;
         this.slider = null;
         this.hitbox = null;
-        // console.log("destroyed");
     }
 
     isReadModeActive() {
@@ -718,6 +684,8 @@ class Minimap {
     }
 
     async onResize() {
+        // Wait for Obsidian's editor layout pass before measuring scroll
+        // dimensions; immediate reads can be stale after mode or pane changes.
         await sleep(300);
 
         this.resize(this.scroller.scrollHeight, this.scroller.clientHeight);
@@ -776,9 +744,7 @@ class Minimap {
             ? "theme-dark"
             : "theme-light";
 
-        const rootStyles = getComputedStyle(
-            document.documentElement.querySelector("body")
-        );
+        const rootStyles = getComputedStyle(document.body);
         let cssVars = ":root {\n";
         for (let i = 0; i < rootStyles.length; i++) {
             const prop = rootStyles[i];
@@ -804,6 +770,7 @@ class Minimap {
         if (this.iframe) {
             this.iframe.onload = () => {
                 if (renderVersion !== this.renderVersion) return;
+                if (!this.container) return;
                 this.onResize();
             };
             this.iframe.srcdoc = html;
@@ -943,8 +910,6 @@ class Minimap {
     };
 }
 
-// editor-mode-change & close-leaf are not working!
-
 export default NoteMinimap;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -993,7 +958,7 @@ function throttle<TArgs extends unknown[], TThis>(
     };
 }
 
-function toRGBAAlpha(color, alpha) {
+function toRGBAAlpha(color: string, alpha: number): string {
     if (color.startsWith("#")) {
         // hex to rgb
         let hex = color.replace("#", "");
@@ -1018,12 +983,17 @@ function toRGBAAlpha(color, alpha) {
     return color;
 }
 
-async function renderReadMode(plugin, structureNode) {
-    const structure = structureNode.cloneNode(true);
+async function renderReadMode(
+    plugin: NoteMinimap,
+    structureNode: HTMLElement
+): Promise<HTMLElement> {
+    const structure = structureNode.cloneNode(true) as HTMLElement;
     structure
         .querySelectorAll(".view-content > :not(.markdown-reading-view)")
         .forEach((e) => e.remove());
-    const destination = structure.querySelector(".markdown-preview-sizer");
+    const destination = structure.querySelector(
+        ".markdown-preview-sizer"
+    ) as HTMLElement;
     const titleElement = destination
         .querySelector(".mod-header")
         ?.cloneNode(true);
@@ -1042,23 +1012,30 @@ async function renderReadMode(plugin, structureNode) {
     return structure;
 }
 
-async function renderEditMode(helperElement, scroller) {
-    let noteContent;
+async function renderEditMode(
+    helperElement: HTMLElement | undefined,
+    scroller: HTMLElement
+): Promise<HTMLElement> {
+    let noteContent: HTMLElement;
     if (helperElement) {
-        noteContent = helperElement.cloneNode(true);
+        noteContent = helperElement.cloneNode(true) as HTMLElement;
     } else {
-        const sizer = scroller.firstChild;
+        const sizer = scroller.firstElementChild as HTMLElement;
         const element = scroller.parentElement.parentElement.parentElement;
 
-        sizer.style = "transform-origin: top right; scale: .1;";
+        sizer.style.cssText = "transform-origin: top right; scale: .1;";
         element.offsetWidth;
+        // Let the browser apply the temporary scale before cloning the
+        // CodeMirror DOM; this helps materialize virtualized long content.
         await sleep(10);
 
-        noteContent = element.cloneNode(true);
-        sizer.style = "";
+        noteContent = element.cloneNode(true) as HTMLElement;
+        sizer.style.cssText = "";
     }
 
-    noteContent.querySelectorAll(".cm-sizer").forEach((e) => (e.style = ""));
+    noteContent
+        .querySelectorAll<HTMLElement>(".cm-sizer")
+        .forEach((e) => (e.style.cssText = ""));
 
     // Remove other content (fix for trouble with Editing Toolbar Plugin)
     noteContent

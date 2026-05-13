@@ -2,6 +2,10 @@
 
 Markdown Minimap adds a minimap panel inside your Obsidian editor pane, giving you a scaled-down visual overview of the entire note. Inspired by modern code editors, this plugin helps you **navigate long Markdown files faster** and with more spatial awareness.
 
+## Why this plugin?
+
+Existing Obsidian minimap plugins lose functionality on long files — past a certain document length, the minimap stops being a usable scrollbar. Markdown Minimap is built specifically to handle long Markdown files correctly, with smooth scroll-with-document behavior similar to VS Code.
+
 ## ✨ Features
 
 - 🔎 **Live minimap view** of the current note - supports all view modes
@@ -32,9 +36,9 @@ You can install Markdown Minimap in **three** ways:
 - Download the latest release from [GitHub Releases](https://github.com/Nymbo/Markdown-Minimap/releases)
 - Extract into your Obsidian `.obsidian/plugins/markdown-minimap` folder
 - Make sure the folder includes:
-  - `main.js`
-  - `manifest.json`
-  - `styles.css` (optional)
+  - `main.js`
+  - `manifest.json`
+  - `styles.css` (optional)
 #### 3. Clone Directly (For Developers)
 
 ```bash
@@ -62,9 +66,9 @@ git clone https://github.com/Nymbo/Markdown-Minimap .obsidian/plugins/markdown-m
 - Minimum viewport highlight height
 - Center-on-click behavior
 
-## 📌 Limitations
+## 📌 Implementation Notes
 
-- Uses workaround to render long notes because of Obsidian's lazy loading  
+**Lazy loading workaround:** Obsidian lazily loads long notes, which causes naive minimap implementations to render only the visible portion. Markdown Minimap uses a hidden-render technique (a duplicate view in the right panel) to capture the full document structure. This is what allows long files to render correctly.
 
 ## Development
 
