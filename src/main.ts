@@ -633,6 +633,7 @@ class Minimap {
     minimapHeight = 0;
     renderVersion = 0;
     isDragging = false;
+    dragMode: "thumb" | "document" = "document";
 
     constructor(
         plugin: NoteMinimap,
@@ -654,6 +655,9 @@ class Minimap {
         // Register events - need to remove on destroy!
         this.scroller.addEventListener("scroll", this.updateSliderScroll);
         this.hitbox.addEventListener("mousedown", this.onMinimapMouseDown);
+        this.hitbox.addEventListener("wheel", this.onMinimapWheel, {
+            passive: false,
+        });
     }
     setHelperLeafId(helperLeafId?: string) {
         this.helperLeafId = helperLeafId;
@@ -716,6 +720,7 @@ class Minimap {
     destroy() {
         this.scroller.removeEventListener("scroll", this.updateSliderScroll);
         this.hitbox.removeEventListener("mousedown", this.onMinimapMouseDown);
+        this.hitbox.removeEventListener("wheel", this.onMinimapWheel);
         activeDocument.removeEventListener("mousemove", this.onSliderMouseMove);
         activeDocument.removeEventListener("mouseup", this.onSliderMouseUp);
 
@@ -932,20 +937,51 @@ class Minimap {
     onMinimapMouseDown = (e: MouseEvent) => {
         e.preventDefault();
         this.isDragging = true;
+        this.dragMode = this.isClientYInsideSlider(e.clientY)
+            ? "thumb"
+            : "document";
         this.slider.classList.add("dragging");
 
-        this.scrollToMinimapClientY(e.clientY, this.centerOnClick);
+        this.scrollToMinimapClientY(
+            e.clientY,
+            this.centerOnClick,
+            this.dragMode
+        );
 
         activeDocument.addEventListener("mousemove", this.onSliderMouseMove);
         activeDocument.addEventListener("mouseup", this.onSliderMouseUp);
     };
 
-    onSliderMouseMove = (e: MouseEvent) => {
-        if (!this.isDragging) return;
-        this.scrollToMinimapClientY(e.clientY, this.centerOnClick);
+    onMinimapWheel = (e: WheelEvent) => {
+        if (!this.scroller) return;
+        e.preventDefault();
+        this.scroller.scrollBy({
+            left: e.deltaX,
+            top: e.deltaY,
+            behavior: "auto",
+        });
+        this.updateSliderScroll();
     };
 
-    scrollToMinimapClientY(clientY: number, centerViewport = false) {
+    onSliderMouseMove = (e: MouseEvent) => {
+        if (!this.isDragging) return;
+        this.scrollToMinimapClientY(
+            e.clientY,
+            this.centerOnClick,
+            this.dragMode
+        );
+    };
+
+    isClientYInsideSlider(clientY: number) {
+        const sliderRect = this.slider.getBoundingClientRect();
+        return clientY >= sliderRect.top && clientY <= sliderRect.bottom;
+    }
+
+    scrollToMinimapClientY(
+        clientY: number,
+        centerViewport = false,
+        mode: "thumb" | "document" = "document"
+    ) {
         const metrics = this.getScrollMetrics();
         if (metrics.maxScroll <= 0) return;
 
@@ -957,16 +993,10 @@ class Minimap {
                 metrics.activeHeight
             )
         );
-        const targetY = centerViewport
-            ? localY - metrics.sliderHeight / 2
-            : localY;
-        const scrollRatio = Math.max(
-            0,
-            Math.min(
-                targetY / Math.max(1, metrics.activeHeight - metrics.sliderHeight),
-                1
-            )
-        );
+        const scrollRatio =
+            mode === "thumb"
+                ? this.getThumbScrollRatio(localY, metrics, centerViewport)
+                : this.getDocumentScrollRatio(localY, metrics, centerViewport);
         const scrollTop = Math.max(
             0,
             Math.min(scrollRatio * metrics.maxScroll, metrics.maxScroll)
@@ -974,6 +1004,39 @@ class Minimap {
 
         this.scroller.scrollTop = scrollTop;
         this.updateSliderScroll();
+    }
+
+    getThumbScrollRatio(
+        localY: number,
+        metrics: ReturnType<Minimap["getScrollMetrics"]>,
+        centerViewport: boolean
+    ) {
+        const targetY = centerViewport
+            ? localY - metrics.sliderHeight / 2
+            : localY;
+        return Math.max(
+            0,
+            Math.min(
+                targetY / Math.max(1, metrics.activeHeight - metrics.sliderHeight),
+                1
+            )
+        );
+    }
+
+    getDocumentScrollRatio(
+        localY: number,
+        metrics: ReturnType<Minimap["getScrollMetrics"]>,
+        centerViewport: boolean
+    ) {
+        const documentY =
+            (localY + metrics.minimapScrollOffset) / Math.max(this.scale, 0.001);
+        const targetScrollTop = centerViewport
+            ? documentY - metrics.clientHeight / 2
+            : documentY;
+        return Math.max(
+            0,
+            Math.min(targetScrollTop / Math.max(1, metrics.maxScroll), 1)
+        );
     }
 
     onSliderMouseUp = () => {
