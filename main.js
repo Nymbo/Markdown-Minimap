@@ -5,7 +5,6 @@ const {
     debounce,
     Setting,
     PluginSettingTab,
-    MarkdownRenderer,
 } = require("obsidian");
 
 class MinimapSettingTab extends PluginSettingTab {
@@ -577,7 +576,12 @@ class Minimap {
     }
 
     async updateIframe(noteContent) {
+        const renderVersion = (this.renderVersion || 0) + 1;
+        this.renderVersion = renderVersion;
+
         if (!noteContent) noteContent = await this.getFullHTML();
+        if (renderVersion !== this.renderVersion) return;
+
         noteContent
             .querySelectorAll(".minimap-frame, .minimap-slider")
             .forEach((el) => el.remove());
@@ -606,6 +610,28 @@ class Minimap {
         cssVars += "}";
         // Remove scrollbar inside minimap
         cssVars += "::-webkit-scrollbar {display: none;}";
+        cssVars += `
+            html,
+            body {
+                margin: 0;
+                min-height: ${this.scroller?.scrollHeight || 0}px;
+                overflow: hidden;
+            }
+
+            .markdown-minimap-source {
+                box-sizing: border-box;
+                min-height: ${this.scroller?.scrollHeight || 0}px;
+                margin: 0;
+                padding: 0 0 0 4px;
+                white-space: pre;
+                overflow: visible;
+                font-family: var(--font-monospace);
+                font-size: 13px;
+                line-height: 18px;
+                tab-size: 2;
+                color: var(--text-normal);
+            }
+        `;
 
         const html = `
 		<!DOCTYPE html>
@@ -617,7 +643,13 @@ class Minimap {
 		</html>
 	`;
 
-        if (this.iframe) this.iframe.srcdoc = html;
+        if (this.iframe) {
+            this.iframe.onload = () => {
+                if (renderVersion !== this.renderVersion) return;
+                this.onResize();
+            };
+            this.iframe.srcdoc = html;
+        }
         this.onResize();
     }
 
@@ -646,7 +678,6 @@ class Minimap {
     getScrollMetrics() {
         const scrollHeight = Math.max(
             this.scroller.scrollHeight,
-            this.fullHeight || 0,
             this.scroller.clientHeight
         );
         const clientHeight = Math.max(this.scroller.clientHeight, 1);
@@ -688,18 +719,26 @@ class Minimap {
     }
 
     async getFullHTML() {
-        const file = this.getFile();
-        if (file) return await renderMarkdownFile(this.plugin, file);
+        const text = await this.getDocumentText();
+        if (text !== null) return renderMarkdownTextMinimap(text);
 
         return this.element.cloneNode(true);
     }
 
-    getFile() {
-        const leaf = this.plugin.app.workspace
+    getLeaf() {
+        return this.plugin.app.workspace
             .getLeavesOfType("markdown")
             .find((leaf) => leaf.view?.contentEl === this.element);
+    }
 
-        return leaf?.view?.file || null;
+    async getDocumentText() {
+        const leaf = this.getLeaf();
+        if (leaf?.view?.getViewData) return await leaf.view.getViewData();
+
+        const file = leaf?.view?.file;
+        if (file) return await file.vault.cachedRead(file);
+
+        return null;
     }
 
     onMinimapMouseDown(e) {
@@ -819,29 +858,14 @@ function toRGBAAlpha(color, alpha) {
     return color;
 }
 
-async function renderMarkdownFile(plugin, file) {
+function renderMarkdownTextMinimap(text) {
     const structure = document.createElement("div");
     structure.className = "view-content";
 
-    const readingView = document.createElement("div");
-    readingView.className = "markdown-reading-view";
-    structure.appendChild(readingView);
-
-    const previewView = document.createElement("div");
-    previewView.className = "markdown-preview-view markdown-rendered";
-    readingView.appendChild(previewView);
-
-    const destination = document.createElement("div");
-    destination.className = "markdown-preview-sizer";
-    previewView.appendChild(destination);
-
-    await MarkdownRenderer.render(
-        plugin.app,
-        await file.vault.read(file),
-        destination,
-        file.path,
-        plugin
-    );
+    const source = document.createElement("pre");
+    source.className = "markdown-minimap-source";
+    source.textContent = text;
+    structure.appendChild(source);
 
     return structure;
 }
