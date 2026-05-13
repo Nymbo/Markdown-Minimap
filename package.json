@@ -1,0 +1,25 @@
+{
+  "name": "markdown-minimap",
+  "version": "1.2.0",
+  "description": "Add a minimap to your Markdown notes.",
+  "author": "Nymbo",
+  "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nymbo/Markdown-Minimap.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Nymbo/Markdown-Minimap/issues"
+  },
+  "homepage": "https://github.com/Nymbo/Markdown-Minimap#readme",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/validate-build.mjs",
+    "lint": "node scripts/validate-build.mjs"
+  },
+  "keywords": [
+    "obsidian",
+    "markdown",
+    "minimap"
+  ]
+}

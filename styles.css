@@ -1,0 +1,40 @@
+.minimap-frame {
+    position: absolute;
+    width: 100%;
+    pointer-events: none;
+    scale: var(--scale);
+    transform-origin: top right;
+    z-index: 1;
+}
+
+.minimap-slider {
+    right: 0;
+    position: absolute;
+    width: calc(100% * var(--scale));
+    background-color: var(--code-comment);
+    z-index: 2;
+}
+
+.minimap-slider.dragging {
+    opacity: 0.5 !important;
+}
+
+.minimap-container {
+    position: absolute;
+    height: 100%;
+    width: 100%;
+}
+
+body:not(.native-scrollbars) ::-webkit-scrollbar {
+    display: none;
+}
+
+body:not(.native-scrollbars) .minimap-disabled ::-webkit-scrollbar {
+    display: block;
+}
+
+.minimap-disabled .minimap-container,
+.minimap-disabled .minimap-frame,
+.minimap-disabled .minimap-slider {
+    display: none !important;
+}
