@@ -1,8 +1,23 @@
-.minimap-frame {
+.minimap-container {
     position: absolute;
-    right: var(--minimap-scrollbar-gutter, 14px);
+    height: 100%;
     width: 100%;
     pointer-events: none;
+    overflow: hidden;
+}
+
+/* The extra specificity intentionally overrides .markdown-preview-view's
+   height/overflow so the content keeps its natural rendered height. */
+.minimap-container .minimap-content {
+    position: absolute;
+    top: 0;
+    right: var(--minimap-scrollbar-gutter, 14px);
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    padding: var(--file-margins, 16px);
+    pointer-events: none;
+    user-select: none;
     scale: var(--scale);
     transform-origin: top right;
     z-index: 1;
@@ -20,14 +35,6 @@
     opacity: 0.5;
 }
 
-.minimap-container {
-    position: absolute;
-    height: 100%;
-    width: 100%;
-    pointer-events: none;
-    overflow: hidden;
-}
-
 .minimap-hitbox {
     position: absolute;
     top: var(--minimap-top-offset, 0px);
@@ -41,38 +48,6 @@
     cursor: pointer;
 }
 
-.minimap-disabled .minimap-container,
-.minimap-disabled .minimap-frame,
-.minimap-disabled .minimap-slider,
-.minimap-disabled .minimap-hitbox {
+.minimap-disabled .minimap-container {
     display: none;
-}
-
-.workspace-leaf.markdown-minimap-helper-leaf {
-    position: fixed !important;
-    left: -10000px !important;
-    top: 0 !important;
-    width: 800px !important;
-    height: 100vh !important;
-    overflow: hidden !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-}
-
-.workspace-tab-header.markdown-minimap-helper-tab {
-    position: absolute !important;
-    width: 1px !important;
-    height: 1px !important;
-    min-width: 1px !important;
-    min-height: 1px !important;
-    max-width: 1px !important;
-    max-height: 1px !important;
-    overflow: hidden !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-}
-
-.markdown-minimap-force-render-scale {
-    transform-origin: top right;
-    scale: .1;
 }

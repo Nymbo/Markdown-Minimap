@@ -12,7 +12,7 @@ Existing Obsidian minimap plugins lose functionality on long files — past a ce
 - 🖱️ **Draggable viewport slider** to scroll instantly
 - 🌓 Supports all themes
 - 💠 Automatically updates on scroll and content change
-- 🔁 Per-note toggle button in the note header
+- 🔁 Per-note toggle and refresh buttons in the note header, plus command-palette commands (hotkey-assignable)
 - 📏 Resizes automatically with the pane
 
 ## 📸 Screenshot
@@ -68,7 +68,7 @@ git clone https://github.com/Nymbo/Markdown-Minimap .obsidian/plugins/markdown-m
 
 ## 📌 Implementation Notes
 
-**Lazy loading workaround:** Obsidian lazily loads long notes, which causes naive minimap implementations to render only the visible portion. Markdown Minimap uses a hidden-render technique (a duplicate view in the right panel) to capture the full document structure. This is what allows long files to render correctly.
+**Full-document rendering:** Obsidian's editor virtualizes long notes, which causes naive DOM-cloning minimap implementations to capture only the visible portion. Markdown Minimap instead renders the note's full Markdown source with Obsidian's own renderer into a scaled-down panel inside the pane, so the minimap always reflects the entire document regardless of length — with no hidden helper views and no iframes.
 
 ## Development
 
