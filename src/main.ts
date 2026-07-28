@@ -601,22 +601,35 @@ class Minimap {
         this.scroller = null;
     }
 
+    // Ask the view for its mode instead of inferring it from layout; a
+    // hidden tab measures 0 everywhere and would misread as reading mode.
     isReadModeActive() {
-        return this.sourceView.clientHeight === 0;
+        return this.view.getMode() === "preview";
+    }
+
+    // Scope to the reading view so we never match the minimap's own
+    // content div, which also carries .markdown-preview-view.
+    getExpectedScroller() {
+        return this.element.querySelector<HTMLElement>(
+            this.isReadModeActive()
+                ? ".markdown-reading-view .markdown-preview-view"
+                : ".cm-scroller"
+        );
     }
 
     modeChange() {
-        // Scope to the reading view so we never match the minimap's own
-        // content div, which also carries .markdown-preview-view.
-        this.changeScroller(
-            this.element.querySelector(
-                this.isReadModeActive()
-                    ? ".markdown-reading-view .markdown-preview-view"
-                    : ".cm-scroller"
-            )
-        );
+        this.syncScroller();
     }
+
+    // Instances created while their tab was hidden may track a stale
+    // element; re-resolve before measuring so the scroll listener always
+    // follows the live scroller.
+    syncScroller() {
+        this.changeScroller(this.getExpectedScroller());
+    }
+
     changeScroller(newScroller: HTMLElement | null) {
+        if (newScroller === this.scroller) return;
         if (this.scroller) {
             this.scroller.removeEventListener("scroll", this.onScroll);
         }
@@ -642,7 +655,8 @@ class Minimap {
         // Wait for Obsidian's editor layout pass before measuring scroll
         // dimensions; immediate reads can be stale after mode or pane changes.
         await sleep(300);
-        this.updateSliderScroll();
+        // Sync now and once more after CodeMirror's height estimate settles.
+        this.onScroll();
     }
 
     setupElements() {
@@ -767,13 +781,13 @@ class Minimap {
     }
 
     updateSliderScroll = () => {
-        if (
-            !this.scroller ||
-            !this.container ||
-            !this.content ||
-            !this.slider ||
-            !this.hitbox
-        )
+        if (!this.container || !this.content || !this.slider || !this.hitbox)
+            return;
+        this.syncScroller();
+        if (!this.scroller) return;
+        // A hidden pane measures 0 everywhere; keep the last geometry and
+        // re-sync once the pane becomes visible again.
+        if (!this.scroller.isConnected || this.scroller.clientHeight === 0)
             return;
         const metrics = this.getScrollMetrics();
         const minimapViewportTop =
@@ -796,6 +810,20 @@ class Minimap {
         this.hitbox.style.height = `${metrics.activeHeight}px`;
     };
 
+    getTrailingPadding() {
+        const inner = this.isReadModeActive()
+            ? this.scroller?.querySelector<HTMLElement>(
+                  ".markdown-preview-sizer"
+              )
+            : this.sourceView.querySelector<HTMLElement>(".cm-content");
+        if (!inner) return 0;
+        const padding = Number.parseFloat(
+            inner.ownerDocument.defaultView?.getComputedStyle(inner)
+                .paddingBottom ?? ""
+        );
+        return Number.isFinite(padding) ? padding : 0;
+    }
+
     getScrollMetrics() {
         const clientHeight = Math.max(this.scroller.clientHeight, 1);
         const scrollHeight = Math.max(this.scroller.scrollHeight, clientHeight);
@@ -810,16 +838,23 @@ class Minimap {
                 (this.topOffset || 0) -
                 (this.bottomOffset || 0)
         );
+        // Obsidian pads the editor and reading view so you can scroll past
+        // the end of the note; that space has no counterpart in the rendered
+        // minimap, so exclude it when mapping editor pixels to minimap pixels.
+        const effectiveScrollHeight = Math.max(
+            clientHeight,
+            scrollHeight - this.getTrailingPadding()
+        );
         // The rendered minimap's height differs from the editor's scroll
         // height (rendered markdown vs. live preview), so map through the
         // minimap content's own height rather than assuming they match.
         const contentHeight =
             this.content && this.content.scrollHeight > 1
                 ? this.content.scrollHeight
-                : scrollHeight;
+                : effectiveScrollHeight;
         const scaledDocumentHeight = Math.max(1, contentHeight * this.scale);
         // Effective scale from editor pixels to minimap pixels
-        const docScale = scaledDocumentHeight / scrollHeight;
+        const docScale = scaledDocumentHeight / effectiveScrollHeight;
         const rawActiveHeight = Math.min(availableHeight, scaledDocumentHeight);
         const sliderHeight = Math.max(
             this.minViewportHeight || 24,
@@ -868,6 +903,7 @@ class Minimap {
     };
 
     onMinimapWheel = (e: WheelEvent) => {
+        this.syncScroller();
         if (!this.scroller) return;
         e.preventDefault();
         this.scroller.scrollBy({
@@ -898,7 +934,9 @@ class Minimap {
         centerViewport = false,
         mode: "thumb" | "document" = "document"
     ) {
-        if (!this.scroller || !this.container) return;
+        if (!this.container) return;
+        this.syncScroller();
+        if (!this.scroller) return;
         const metrics = this.getScrollMetrics();
         if (metrics.maxScroll <= 0) return;
 
