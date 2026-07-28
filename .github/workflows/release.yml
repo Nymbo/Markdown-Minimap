@@ -31,8 +31,13 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          prerelease_flag=""
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            prerelease_flag="--prerelease"
+          fi
           gh release create "${GITHUB_REF_NAME}" main.js manifest.json styles.css \
             --repo "${GITHUB_REPOSITORY}" \
             --title "${GITHUB_REF_NAME}" \
             --notes "Release ${GITHUB_REF_NAME}" \
+            ${prerelease_flag} \
             --verify-tag

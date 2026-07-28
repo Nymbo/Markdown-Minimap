@@ -23,6 +23,32 @@
     z-index: 1;
 }
 
+.minimap-container .minimap-content.minimap-source-mode {
+    padding: 0;
+}
+
+.minimap-source-document {
+    position: absolute;
+    inset-block-start: 0;
+    color: var(--text-normal);
+}
+
+.minimap-source-line {
+    position: absolute;
+    inset-inline: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.minimap-source-mode .minimap-inline-title {
+    overflow: hidden;
+    margin: 0;
+}
+
 .minimap-slider {
     right: var(--minimap-scrollbar-gutter, 14px);
     position: absolute;

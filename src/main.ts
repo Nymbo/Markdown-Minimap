@@ -8,6 +8,7 @@ import {
     PluginSettingTab,
     MarkdownRenderer,
 } from "obsidian";
+import { EditorView } from "@codemirror/view";
 
 class MinimapSettingTab extends PluginSettingTab {
     plugin: NoteMinimap;
@@ -639,6 +640,15 @@ class Minimap {
         // Wait for Obsidian's editor layout pass before measuring scroll
         // dimensions; immediate reads can be stale after mode or pane changes.
         await sleep(300);
+        if (!this.isReadModeActive()) {
+            const editorView = this.getEditorView();
+            if (editorView) {
+                this.renderSourceDocument(
+                    this.view.getViewData(),
+                    editorView
+                );
+            }
+        }
         this.updateSliderScroll();
     }
 
@@ -668,15 +678,120 @@ class Minimap {
         container.appendChild(this.hitbox);
     }
 
-    // Render the note's full Markdown source into the scaled minimap panel.
-    // Rendering from source sidesteps CodeMirror's virtualization, so long
-    // notes are always captured completely.
+    getEditorView() {
+        const editorElement =
+            this.sourceView.querySelector<HTMLElement>(".cm-editor");
+        return editorElement ? EditorView.findFromDOM(editorElement) : null;
+    }
+
+    renderSourceDocument(data: string, editorView: EditorView) {
+        if (!this.content || !this.scroller) return;
+
+        this.renderComponent?.unload();
+        this.renderComponent = null;
+        this.content.empty();
+        this.content.classList.add("minimap-source-mode");
+
+        const scrollerRect = this.scroller.getBoundingClientRect();
+        const contentRect = editorView.contentDOM.getBoundingClientRect();
+        const documentOffset =
+            editorView.documentTop -
+            scrollerRect.top +
+            this.scroller.scrollTop;
+        const contentLeft =
+            contentRect.left -
+            scrollerRect.left +
+            this.scroller.scrollLeft;
+        const totalHeight = Math.max(
+            this.scroller.scrollHeight,
+            documentOffset +
+                editorView.contentHeight +
+                editorView.documentPadding.bottom
+        );
+
+        this.content.style.height = `${totalHeight}px`;
+
+        const inlineTitle =
+            this.sourceView.querySelector<HTMLElement>(".inline-title");
+        if (inlineTitle && inlineTitle.clientHeight > 0) {
+            const titleRect = inlineTitle.getBoundingClientRect();
+            const title = inlineTitle.cloneNode(true) as HTMLElement;
+            title.removeAttribute("id");
+            title.removeAttribute("contenteditable");
+            title.classList.add("minimap-inline-title");
+            title.style.position = "absolute";
+            title.style.top = `${
+                titleRect.top -
+                scrollerRect.top +
+                this.scroller.scrollTop
+            }px`;
+            title.style.left = `${
+                titleRect.left -
+                scrollerRect.left +
+                this.scroller.scrollLeft
+            }px`;
+            title.style.width = `${titleRect.width}px`;
+            title.style.height = `${titleRect.height}px`;
+            this.content.appendChild(title);
+        }
+
+        const source = activeDocument.createElement("div");
+        source.className = "minimap-source-document";
+        source.style.left = `${contentLeft}px`;
+        source.style.width = `${Math.max(contentRect.width, 1)}px`;
+
+        const editorStyle =
+            editorView.contentDOM.ownerDocument.defaultView?.getComputedStyle(
+                editorView.contentDOM
+            );
+        if (editorStyle) {
+            source.style.fontFamily = editorStyle.fontFamily;
+            source.style.fontSize = editorStyle.fontSize;
+            source.style.fontWeight = editorStyle.fontWeight;
+            source.style.lineHeight = editorStyle.lineHeight;
+            source.style.letterSpacing = editorStyle.letterSpacing;
+            source.style.tabSize = editorStyle.tabSize;
+        }
+        this.content.appendChild(source);
+
+        const sourceLines = data.split(/\r?\n/);
+        const document = editorView.state.doc;
+        const lineCount = Math.min(sourceLines.length, document.lines);
+        const fragment = activeDocument.createDocumentFragment();
+
+        for (let number = 1; number <= lineCount; number++) {
+            const documentLine = document.line(number);
+            const block = editorView.lineBlockAt(documentLine.from);
+            const line = activeDocument.createElement("div");
+            line.className = "minimap-source-line";
+            line.setAttribute("aria-hidden", "true");
+            line.style.top = `${documentOffset + block.top}px`;
+            line.style.height = `${Math.max(block.height, 1)}px`;
+            line.textContent = sourceLines[number - 1] || "\u200b";
+            fragment.appendChild(line);
+        }
+
+        source.appendChild(fragment);
+    }
+
+    // Reading mode collapses blank source lines itself, so render normal
+    // Markdown there. Editing mode uses CodeMirror's measured line blocks to
+    // keep every source line at its exact vertical document position.
     async render() {
         const renderVersion = ++this.renderVersion;
         const file = this.view.file;
         if (!file || !this.content) return;
 
         const data = this.view.getViewData();
+        if (!this.isReadModeActive()) {
+            const editorView = this.getEditorView();
+            if (editorView) {
+                this.renderSourceDocument(data, editorView);
+                this.updateSliderScroll();
+                return;
+            }
+        }
+
         const component = new Component();
         component.load();
         const rendered = activeDocument.createElement("div");
@@ -703,6 +818,8 @@ class Minimap {
         this.renderComponent = component;
 
         this.content.empty();
+        this.content.classList.remove("minimap-source-mode");
+        this.content.style.removeProperty("height");
         this.content.createDiv({
             cls: "inline-title minimap-inline-title",
             text: file.basename,
