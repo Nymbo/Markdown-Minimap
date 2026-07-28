@@ -9,6 +9,8 @@ import {
     MarkdownRenderer,
 } from "obsidian";
 import { EditorView } from "@codemirror/view";
+import { prepareBlankLineRuns } from "./blank-lines";
+import type { BlankLineRun } from "./blank-lines";
 
 class MinimapSettingTab extends PluginSettingTab {
     plugin: NoteMinimap;
@@ -640,15 +642,6 @@ class Minimap {
         // Wait for Obsidian's editor layout pass before measuring scroll
         // dimensions; immediate reads can be stale after mode or pane changes.
         await sleep(300);
-        if (!this.isReadModeActive()) {
-            const editorView = this.getEditorView();
-            if (editorView) {
-                this.renderSourceDocument(
-                    this.view.getViewData(),
-                    editorView
-                );
-            }
-        }
         this.updateSliderScroll();
     }
 
@@ -684,113 +677,56 @@ class Minimap {
         return editorElement ? EditorView.findFromDOM(editorElement) : null;
     }
 
-    renderSourceDocument(data: string, editorView: EditorView) {
-        if (!this.content || !this.scroller) return;
+    applyBlankLineHeights(
+        rendered: HTMLElement,
+        runs: BlankLineRun[],
+        editorView: EditorView | null
+    ) {
+        const editorLine =
+            this.sourceView.querySelector<HTMLElement>(".cm-line");
+        const fallbackLineHeight = editorLine
+            ? Number.parseFloat(
+                  editorLine.ownerDocument.defaultView
+                      ?.getComputedStyle(editorLine)
+                      .lineHeight ?? ""
+              )
+            : 24;
+        const document = editorView?.state.doc;
 
-        this.renderComponent?.unload();
-        this.renderComponent = null;
-        this.content.empty();
-        this.content.classList.add("minimap-source-mode");
-
-        const scrollerRect = this.scroller.getBoundingClientRect();
-        const contentRect = editorView.contentDOM.getBoundingClientRect();
-        const documentOffset =
-            editorView.documentTop -
-            scrollerRect.top +
-            this.scroller.scrollTop;
-        const contentLeft =
-            contentRect.left -
-            scrollerRect.left +
-            this.scroller.scrollLeft;
-        const totalHeight = Math.max(
-            this.scroller.scrollHeight,
-            documentOffset +
-                editorView.contentHeight +
-                editorView.documentPadding.bottom
-        );
-
-        this.content.style.height = `${totalHeight}px`;
-
-        const inlineTitle =
-            this.sourceView.querySelector<HTMLElement>(".inline-title");
-        if (inlineTitle && inlineTitle.clientHeight > 0) {
-            const titleRect = inlineTitle.getBoundingClientRect();
-            const title = inlineTitle.cloneNode(true) as HTMLElement;
-            title.removeAttribute("id");
-            title.removeAttribute("contenteditable");
-            title.classList.add("minimap-inline-title");
-            title.style.position = "absolute";
-            title.style.top = `${
-                titleRect.top -
-                scrollerRect.top +
-                this.scroller.scrollTop
-            }px`;
-            title.style.left = `${
-                titleRect.left -
-                scrollerRect.left +
-                this.scroller.scrollLeft
-            }px`;
-            title.style.width = `${titleRect.width}px`;
-            title.style.height = `${titleRect.height}px`;
-            this.content.appendChild(title);
-        }
-
-        const source = activeDocument.createElement("div");
-        source.className = "minimap-source-document";
-        source.style.left = `${contentLeft}px`;
-        source.style.width = `${Math.max(contentRect.width, 1)}px`;
-
-        const editorStyle =
-            editorView.contentDOM.ownerDocument.defaultView?.getComputedStyle(
-                editorView.contentDOM
+        for (const run of runs) {
+            const marker = rendered.querySelector<HTMLElement>(
+                `.${run.markerClass}`
             );
-        if (editorStyle) {
-            source.style.fontFamily = editorStyle.fontFamily;
-            source.style.fontSize = editorStyle.fontSize;
-            source.style.fontWeight = editorStyle.fontWeight;
-            source.style.lineHeight = editorStyle.lineHeight;
-            source.style.letterSpacing = editorStyle.letterSpacing;
-            source.style.tabSize = editorStyle.tabSize;
+            if (!marker) continue;
+
+            let height = 0;
+            if (editorView && document) {
+                for (const lineNumber of run.sourceLineNumbers) {
+                    if (lineNumber > document.lines) continue;
+                    const line = document.line(lineNumber);
+                    height += editorView.lineBlockAt(line.from).height;
+                }
+            } else {
+                height =
+                    run.sourceLineNumbers.length *
+                    (Number.isFinite(fallbackLineHeight)
+                        ? fallbackLineHeight
+                        : 24);
+            }
+            marker.style.height = `${Math.max(0, height)}px`;
         }
-        this.content.appendChild(source);
-
-        const sourceLines = data.split(/\r?\n/);
-        const document = editorView.state.doc;
-        const lineCount = Math.min(sourceLines.length, document.lines);
-        const fragment = activeDocument.createDocumentFragment();
-
-        for (let number = 1; number <= lineCount; number++) {
-            const documentLine = document.line(number);
-            const block = editorView.lineBlockAt(documentLine.from);
-            const line = activeDocument.createElement("div");
-            line.className = "minimap-source-line";
-            line.setAttribute("aria-hidden", "true");
-            line.style.top = `${documentOffset + block.top}px`;
-            line.style.height = `${Math.max(block.height, 1)}px`;
-            line.textContent = sourceLines[number - 1] || "\u200b";
-            fragment.appendChild(line);
-        }
-
-        source.appendChild(fragment);
     }
 
-    // Reading mode collapses blank source lines itself, so render normal
-    // Markdown there. Editing mode uses CodeMirror's measured line blocks to
-    // keep every source line at its exact vertical document position.
+    // Render the note's full Markdown source into the scaled minimap panel.
+    // Blank-line markers retain the source's vertical spacing without
+    // replacing Obsidian's rendered Markdown output.
     async render() {
         const renderVersion = ++this.renderVersion;
         const file = this.view.file;
         if (!file || !this.content) return;
 
-        const data = this.view.getViewData();
-        if (!this.isReadModeActive()) {
-            const editorView = this.getEditorView();
-            if (editorView) {
-                this.renderSourceDocument(data, editorView);
-                this.updateSliderScroll();
-                return;
-            }
-        }
+        const data = prepareBlankLineRuns(this.view.getViewData());
+        const editorView = this.getEditorView();
 
         const component = new Component();
         component.load();
@@ -798,7 +734,7 @@ class Minimap {
         try {
             await MarkdownRenderer.render(
                 this.plugin.app,
-                data,
+                data.markdown,
                 rendered,
                 file.path,
                 component
@@ -814,12 +750,11 @@ class Minimap {
             return;
         }
 
+        this.applyBlankLineHeights(rendered, data.runs, editorView);
         this.renderComponent?.unload();
         this.renderComponent = component;
 
         this.content.empty();
-        this.content.classList.remove("minimap-source-mode");
-        this.content.style.removeProperty("height");
         this.content.createDiv({
             cls: "inline-title minimap-inline-title",
             text: file.basename,
