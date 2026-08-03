@@ -68,16 +68,20 @@ dragging it.
 | Top / bottom offset | Clearance for plugin toolbars or bottom chrome |
 | Scrollbar gap | Distance between the minimap and the editor's scrollbar |
 | Minimum viewport height | Floor for the viewport marker, so it stays grabbable in long notes |
-| Make room for the minimap | Moves the note's text so it stays centred in the space beside the minimap |
+| Make room for the minimap | Moves the note's text so it stays centred in the space beside the minimap. On by default; needs readable line length |
 | Center on click | Whether clicking the minimap centres the viewport on that point, or puts it at the top. Dragging the marker is unaffected |
 
 ### 💡 Giving the minimap room
 
-If the minimap crowds your text, turn on **Make room for the minimap** together
-with `Settings` → `Editor` → `Readable line length`. The text shifts by exactly
-half the space the minimap covers, so the gaps either side of it stay equal at
-any zoom, font size or screen. Without readable line length there is no margin
-to borrow, and the text is left alone rather than clipped.
+**Make room for the minimap** is on by default, and works together with
+`Settings` → `Editor` → `Readable line length`. The text shifts by exactly half
+the space the minimap covers, so the gaps either side of it stay equal at any
+zoom, font size or screen.
+
+Without readable line length there is no margin to borrow: the text already
+fills the pane, so it is left alone rather than clipped — and it will sit under
+the minimap. Turn readable line length on, or narrow the pane, if that bothers
+you.
 
 Thanks to [@2590812378](https://github.com/Nymbo/Markdown-Minimap/issues/3) for
 suggesting this, originally as a CSS snippet, and for the follow-up that led to

@@ -24,7 +24,9 @@ export function getDefaultSettings(this: void): MarkdownMinimapSettings {
         bottomOffset: 0,
         scrollbarGutter: 14,
         minViewportHeight: 24,
-        reserveSpace: false,
+        // On by default: the minimap draws over the note, so letting the text
+        // run underneath it is the wrong thing to do unasked.
+        reserveSpace: true,
         centerOnClick: true,
     };
 }
