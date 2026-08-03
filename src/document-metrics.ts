@@ -63,6 +63,51 @@ export interface MirrorOptions {
     content: HTMLElement;
     readMode: boolean;
     rawSourceMode: boolean;
+    /** Page-space left edge of the visible minimap strip. */
+    stripLeft: number;
+    /** Whether to move the note's text clear of the minimap. */
+    reserveSpace: boolean;
+}
+
+/**
+ * How far the note's text should move so it is centred in the space left over
+ * once the minimap has taken its strip.
+ *
+ * The text is centred between the scroller's content edges; the strip covers
+ * part of the right one. Shifting left by half that overlap makes the two
+ * visible gaps equal, at any resolution, font size or scale — no manual pixel
+ * value to get wrong.
+ *
+ * The overlap is measured rather than derived from the strip's width: the
+ * minimap container spans the whole view, while the text is centred inside the
+ * scroller's padding, so the two right edges do not coincide.
+ *
+ * Clamped to the margin that actually exists, so the text can never be pushed
+ * off its own left edge and clipped.
+ */
+function reserveShift(
+    this: void,
+    scroller: HTMLElement | null,
+    sizer: HTMLElement | null,
+    stripLeft: number
+): number {
+    if (!scroller || !sizer || stripLeft <= 0) return 0;
+    const style = computedStyle(scroller);
+    const rect = scroller.getBoundingClientRect();
+    // clientWidth excludes the native scrollbar, the bounding rect does not.
+    // Measuring the content edge from the rect would place it a scrollbar's
+    // width too far right and skew the shift by half of that.
+    const contentRight =
+        rect.left + scroller.clientWidth - pixels(style?.paddingRight);
+    const available =
+        scroller.clientWidth -
+        pixels(style?.paddingLeft) -
+        pixels(style?.paddingRight);
+    // With readable line length off the text already fills the width, so there
+    // is no margin to borrow and shifting would only clip.
+    const leftMargin = Math.max(0, (available - sizer.clientWidth) / 2);
+    const overlap = contentRight - stripLeft;
+    return Math.max(0, Math.min(overlap / 2, leftMargin));
 }
 
 /**
@@ -96,12 +141,30 @@ export function mirrorDocumentMetrics(
         pixels(computedStyle(sizer)?.paddingTop);
     container.style.setProperty("--minimap-doc-padding-top", `${paddingTop}px`);
     // The file margin below the last line is part of the note's scrollable
-    // height, and is not the scroll-past-end padding trimmed elsewhere, so the
-    // panel needs its counterpart to end where the note ends.
+    // height, so the panel needs its counterpart to end where the note ends.
     container.style.setProperty(
         "--minimap-doc-padding-bottom",
         `${pixels(computedStyle(scroller)?.paddingBottom)}px`
     );
+    // Obsidian lets you scroll past the end of a note. That space is part of
+    // the scroll range the thumb travels, so the panel mirrors it rather than
+    // the mapping pretending it is not there.
+    container.style.setProperty(
+        "--minimap-scroll-past-end",
+        `${measureTrailingPadding(element, readMode, scroller)}px`
+    );
+
+    // Published on the view element, not the panel, so it survives re-renders.
+    const shift = options.reserveSpace
+        ? reserveShift(scroller, sizer, options.stripLeft)
+        : 0;
+    if (shift > 0) {
+        element.style.setProperty("--minimap-content-shift", `${shift}px`);
+        element.classList.add("minimap-content-shifted");
+    } else {
+        element.style.removeProperty("--minimap-content-shift");
+        element.classList.remove("minimap-content-shifted");
+    }
 
     // Themes commonly scope line height to selectors the panel does not match,
     // so mirror the resolved values instead of relying on class inheritance.

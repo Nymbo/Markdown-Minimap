@@ -27,6 +27,8 @@ export class MinimapPointer {
     private readonly host: PointerHost;
     private dragging = false;
     private dragMode: DragMode = "document";
+    /** Distance from the thumb's top to where it was grabbed. */
+    private grabOffset = 0;
 
     constructor(host: PointerHost) {
         this.host = host;
@@ -62,13 +64,23 @@ export class MinimapPointer {
 
     private onMouseDown = (event: MouseEvent) => {
         event.preventDefault();
+        const slider = this.host.slider;
+        const onThumb = this.isInsideSlider(event.clientY);
         this.dragging = true;
-        this.dragMode = this.isInsideSlider(event.clientY)
-            ? "thumb"
-            : "document";
-        this.host.slider?.classList.add("dragging");
+        this.dragMode = onThumb ? "thumb" : "document";
+        slider?.classList.add("dragging");
 
-        this.scrollToClientY(event.clientY);
+        if (onThumb && slider) {
+            // Grab the thumb where it was actually clicked and keep that offset
+            // for the drag. Recentring it on the pointer instead makes an
+            // off-centre grab jump, then sit dead until the pointer catches up.
+            this.grabOffset =
+                event.clientY - slider.getBoundingClientRect().top;
+        } else {
+            // A click on the track does move the view, to that position.
+            this.grabOffset = 0;
+            this.scrollToClientY(event.clientY);
+        }
 
         activeDocument.addEventListener("mousemove", this.onMouseMove);
         activeDocument.addEventListener("mouseup", this.onMouseUp);
@@ -127,27 +139,32 @@ export class MinimapPointer {
         this.host.onScrolled();
     }
 
-    /** Dragging the thumb maps the track directly onto the scroll range. */
-    private thumbScrollTop(localY: number, metrics: ScrollMetrics) {
-        const targetY = this.host.centerOnClick
-            ? localY - metrics.sliderHeight / 2
-            : localY;
-        const ratio = clamp(
-            targetY / Math.max(1, metrics.activeHeight - metrics.sliderHeight),
-            0,
-            1
+    /**
+     * Editor position for a point on the panel, through the same mapping that
+     * placed the thumb. Using the track ratio instead leaves the thumb a few
+     * pixels behind the pointer, because the mapping is piecewise and the
+     * ratio is not its inverse.
+     */
+    private panelYToScrollTop(panelLocalY: number, metrics: ScrollMetrics) {
+        const panelY = panelLocalY + metrics.minimapScrollOffset;
+        const mapped = this.host.mapToEditor(
+            panelY / Math.max(this.host.scale, 0.001)
         );
-        return ratio * metrics.maxScroll;
+        return mapped ?? panelY / Math.max(metrics.docScale, 0.001);
+    }
+
+    /**
+     * Dragging the thumb holds the point where it was grabbed under the
+     * pointer. "Center on click" governs clicks on the track only — a grab on
+     * the thumb should never move the view on its own.
+     */
+    private thumbScrollTop(localY: number, metrics: ScrollMetrics) {
+        return this.panelYToScrollTop(localY - this.grabOffset, metrics);
     }
 
     /** Clicking the panel goes to the position under the pointer. */
     private documentScrollTop(localY: number, metrics: ScrollMetrics) {
-        const panelY = localY + metrics.minimapScrollOffset;
-        const mapped = this.host.mapToEditor(
-            panelY / Math.max(this.host.scale, 0.001)
-        );
-        const documentY =
-            mapped ?? panelY / Math.max(metrics.docScale, 0.001);
+        const documentY = this.panelYToScrollTop(localY, metrics);
         return this.host.centerOnClick
             ? documentY - metrics.clientHeight / 2
             : documentY;

@@ -10,7 +10,7 @@ export interface MarkdownMinimapSettings {
     bottomOffset: number;
     scrollbarGutter: number;
     minViewportHeight: number;
-    contentShift: number;
+    reserveSpace: boolean;
     centerOnClick: boolean;
 }
 
@@ -24,7 +24,7 @@ export function getDefaultSettings(this: void): MarkdownMinimapSettings {
         bottomOffset: 0,
         scrollbarGutter: 14,
         minViewportHeight: 24,
-        contentShift: 0,
+        reserveSpace: false,
         centerOnClick: true,
     };
 }
@@ -144,15 +144,14 @@ export class MinimapSettingTab extends PluginSettingTab {
             "minViewportHeight",
             [8, 80, 1]
         );
-        this.addSlider(
-            "Shift note content left",
-            "Move the note's text away from the minimap (pixels) - works best with readable line length enabled",
-            "contentShift",
-            [0, 96, 1]
+        this.addToggle(
+            "Make room for the minimap",
+            "Move the note's text so it stays centred in the space beside the minimap. Needs readable line length enabled; without it there is no margin to borrow and the text is left alone",
+            "reserveSpace"
         );
         this.addToggle(
             "Center on click",
-            "Center the editor viewport around the clicked minimap position",
+            "Center the editor viewport on the clicked position. Applies to clicks on the minimap, not to dragging the viewport marker",
             "centerOnClick"
         );
 

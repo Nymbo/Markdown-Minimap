@@ -68,15 +68,20 @@ dragging it.
 | Top / bottom offset | Clearance for plugin toolbars or bottom chrome |
 | Scrollbar gap | Distance between the minimap and the editor's scrollbar |
 | Minimum viewport height | Floor for the viewport marker, so it stays grabbable in long notes |
-| Shift note content left | Moves the note's text away from the minimap |
-| Center on click | Whether clicking centres the viewport on that point, or puts it at the top |
+| Make room for the minimap | Moves the note's text so it stays centred in the space beside the minimap |
+| Center on click | Whether clicking the minimap centres the viewport on that point, or puts it at the top. Dragging the marker is unaffected |
 
 ### 💡 Giving the minimap room
 
-If the minimap crowds your text, raise **Shift note content left** and turn on
-`Settings` → `Editor` → `Readable line length`. Thanks to
-[@2590812378](https://github.com/Nymbo/Markdown-Minimap/issues/3) for
-suggesting this, originally as a CSS snippet.
+If the minimap crowds your text, turn on **Make room for the minimap** together
+with `Settings` → `Editor` → `Readable line length`. The text shifts by exactly
+half the space the minimap covers, so the gaps either side of it stay equal at
+any zoom, font size or screen. Without readable line length there is no margin
+to borrow, and the text is left alone rather than clipped.
+
+Thanks to [@2590812378](https://github.com/Nymbo/Markdown-Minimap/issues/3) for
+suggesting this, originally as a CSS snippet, and for the follow-up that led to
+it being computed rather than typed in by hand.
 
 ## 📌 How it works
 
@@ -111,6 +116,12 @@ mapped height. The minimap matches the editor's box.
 **Blank lines.** Markdown collapses consecutive blank lines when rendered. They
 are re-inserted as inert spacers sized from CodeMirror's line blocks, so
 deliberate whitespace survives.
+
+**The full scroll range.** Obsidian lets you scroll past the end of a note, and
+its own scrollbar covers that space. The minimap mirrors it with a matching
+spacer rather than leaving it out, so the marker reaches the end of its track
+exactly when the editor does and wheel distance keeps matching marker travel all
+the way down.
 
 **Scroll mapping.** Scaling the note by a single ratio assumes the minimap grows
 at the same rate the note does, which it doesn't — small per-block differences

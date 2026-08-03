@@ -9,26 +9,26 @@ import { clamp } from "./utils";
  */
 
 export interface DocumentHeights {
-    /** Scroll height minus the space Obsidian adds for scrolling past the end. */
+    /** The full scroll range the editor actually offers. */
     effectiveScrollHeight: number;
     /** Minimap panel height, falling back to the editor's when unmeasurable. */
     contentHeight: number;
 }
 
+/**
+ * The mapping covers the editor's whole scroll range, including the space
+ * Obsidian adds for scrolling past the end of a note. Excluding it made the
+ * thumb reach its stop while the editor kept scrolling, so wheel distance
+ * stopped matching thumb travel near the bottom and the scroll felt sticky.
+ * The panel carries a matching spacer so the two stay proportional.
+ */
 export function resolveDocumentHeights(
     this: void,
     clientHeight: number,
     scrollHeight: number,
-    trailingPadding: number,
     measuredContentHeight: number
 ): DocumentHeights {
-    // Obsidian pads the editor and reading view so you can scroll past the end
-    // of the note; that space has no counterpart in the panel, so exclude it
-    // when mapping editor pixels to minimap pixels.
-    const effectiveScrollHeight = Math.max(
-        clientHeight,
-        scrollHeight - trailingPadding
-    );
+    const effectiveScrollHeight = Math.max(clientHeight, scrollHeight);
     return {
         effectiveScrollHeight,
         // The panel's height differs from the editor's scroll height, so map

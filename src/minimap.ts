@@ -3,11 +3,7 @@ import { EditorView } from "@codemirror/view";
 import { prepareBlankLineRuns } from "./blank-lines";
 import type { BlankLineRun } from "./blank-lines";
 import { AnchorTracker } from "./anchors";
-import {
-    measureTrailingPadding,
-    mirrorCodeMetrics,
-    mirrorDocumentMetrics,
-} from "./document-metrics";
+import { mirrorCodeMetrics, mirrorDocumentMetrics } from "./document-metrics";
 import { findInlineTitle, renderFrontmatter } from "./frontmatter";
 import { MinimapPointer } from "./pointer";
 import type { PointerHost } from "./pointer";
@@ -22,7 +18,7 @@ import {
 import type { ScrollMetrics } from "./scroll-model";
 import type { MarkdownMinimapSettings } from "./settings";
 import type NoteMinimap from "./main";
-import { clamp, computedStyle, sleep, toRGBAAlpha } from "./utils";
+import { clamp, computedStyle, pixels, sleep, toRGBAAlpha } from "./utils";
 
 export class Minimap implements PointerHost {
     plugin: NoteMinimap;
@@ -42,7 +38,7 @@ export class Minimap implements PointerHost {
     bottomOffset = 0;
     scrollbarGutter = 14;
     minViewportHeight = 24;
-    contentShift = 0;
+    reserveSpace = false;
     centerOnClick = true;
     backgroundColor = "";
     renderVersion = 0;
@@ -142,7 +138,7 @@ export class Minimap implements PointerHost {
         this.bottomOffset = settings.bottomOffset;
         this.scrollbarGutter = settings.scrollbarGutter;
         this.minViewportHeight = settings.minViewportHeight;
-        this.contentShift = settings.contentShift;
+        this.reserveSpace = settings.reserveSpace;
         this.centerOnClick = settings.centerOnClick;
 
         this.backgroundColor = toRGBAAlpha(
@@ -179,23 +175,20 @@ export class Minimap implements PointerHost {
         }
         if (this.content)
             this.content.style.backgroundColor = this.backgroundColor;
-        this.applyContentShift();
+        // The reserve is measured, so it is recomputed with the rest of the
+        // document metrics rather than written directly from the setting.
+        this.syncDocumentMetrics();
     }
 
-    // Nudge the note's own text away from the minimap. Applied to the view's
-    // content element rather than the minimap so it survives re-renders, and
-    // gated on the class so a disabled minimap leaves the note alone.
-    applyContentShift() {
-        if (this.contentShift > 0) {
-            this.element.style.setProperty(
-                "--minimap-content-shift",
-                `${this.contentShift}px`
-            );
-            this.element.classList.add("minimap-content-shifted");
-        } else {
-            this.element.style.removeProperty("--minimap-content-shift");
-            this.element.classList.remove("minimap-content-shifted");
-        }
+    /**
+     * Page-space left edge of the visible minimap strip. Measured from the
+     * hitbox, which is the strip: deriving it from the doc width and scale
+     * would ignore that the container spans the whole view rather than the
+     * scroller's content box.
+     */
+    getStripLeft() {
+        const rect = this.hitbox?.getBoundingClientRect();
+        return rect && rect.width > 0 ? rect.left : 0;
     }
 
     // --- mode and scroller ------------------------------------------------
@@ -274,6 +267,8 @@ export class Minimap implements PointerHost {
             content: this.content,
             readMode: this.isReadModeActive(),
             rawSourceMode: this.isRawSourceMode(),
+            stripLeft: this.getStripLeft(),
+            reserveSpace: this.reserveSpace,
         });
         this.syncCodeBlockMetrics();
     }
@@ -512,11 +507,6 @@ export class Minimap implements PointerHost {
         const heights = resolveDocumentHeights(
             clientHeight,
             scrollHeight,
-            measureTrailingPadding(
-                this.element,
-                this.isReadModeActive(),
-                this.scroller
-            ),
             this.content?.scrollHeight ?? 0
         );
 
