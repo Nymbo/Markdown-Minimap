@@ -146,12 +146,6 @@ Bug reports and feature requests are welcome — open an
 lot for anything visual, as does the note's view mode, since the three modes
 take different paths through the code.
 
-## Credits
-
-Originally based on [YairSegel/ObsidianMinimap](https://github.com/YairSegel/ObsidianMinimap),
-distributed under the MIT License. Little of the original implementation
-remains, but the idea and the starting point came from there.
-
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE) © Devan Eckert.
