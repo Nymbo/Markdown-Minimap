@@ -1,3 +1,5 @@
+import { collectHeadingLines } from "./anchors";
+
 export interface BlankLineRun {
     markerClass: string;
     sourceLineNumbers: number[];
@@ -6,6 +8,9 @@ export interface BlankLineRun {
 export interface BlankLineRenderData {
     markdown: string;
     runs: BlankLineRun[];
+    frontmatterLineCount: number;
+    /** Source line numbers of headings, for anchor-based scroll mapping. */
+    headingLines: number[];
 }
 
 type Fence = {
@@ -28,7 +33,28 @@ function getFence(this: void, line: string): Fence | null {
     };
 }
 
-function getProtectedLines(this: void, lines: string[]): boolean[] {
+/**
+ * Number of source lines occupied by the YAML frontmatter block, delimiters
+ * included. Zero when the note has no frontmatter or the block is unterminated.
+ */
+export function getFrontmatterLineCount(this: void, lines: string[]): number {
+    if (lines.length === 0) return 0;
+    if (lines[0].replace(/^\uFEFF/, "").trim() !== "---") return 0;
+
+    for (let index = 1; index < lines.length; index++) {
+        const line = lines[index].trim();
+        if (line === "---" || line === "...") return index + 1;
+    }
+
+    return 0;
+}
+
+/**
+ * Lines whose content must not be treated as Markdown structure: fenced code
+ * blocks and frontmatter. Shared with anchor collection so a `#` inside a code
+ * fence is never mistaken for a heading.
+ */
+export function getProtectedLines(this: void, lines: string[]): boolean[] {
     const protectedLines = Array.from(
         { length: lines.length },
         () => false
@@ -127,5 +153,7 @@ export function prepareBlankLineRuns(
     return {
         markdown: output.join(newline),
         runs,
+        frontmatterLineCount: getFrontmatterLineCount(lines),
+        headingLines: collectHeadingLines(lines, protectedLines),
     };
 }

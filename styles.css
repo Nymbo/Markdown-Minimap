@@ -7,20 +7,52 @@
 }
 
 /* The extra specificity intentionally overrides .markdown-preview-view's
-   height/overflow so the content keeps its natural rendered height. */
+   height/overflow so the content keeps its natural rendered height.
+   The width and top padding mirror the note's own layout so lines wrap at the
+   same points they do in the editor. */
 .minimap-container .minimap-content {
     position: absolute;
     top: 0;
     right: var(--minimap-scrollbar-gutter, 14px);
-    width: 100%;
+    width: var(--minimap-doc-width, 100%);
     height: auto;
     overflow: visible;
-    padding: var(--file-margins, 16px);
+    padding: var(--minimap-doc-padding-top, 0px) 0
+        var(--minimap-doc-padding-bottom, 0px) 0;
     pointer-events: none;
     user-select: none;
     scale: var(--scale);
     transform-origin: top right;
     z-index: 1;
+}
+
+/* Sized to the height the properties occupy in the note itself, whether they
+   render as the properties widget or as raw YAML. */
+.minimap-content .markdown-minimap-properties {
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* A rendered <pre> is inset on both sides; an editor code line only on the
+   left. That difference alone wraps wide code one column early and scrambles
+   ASCII art, so drop the right inset unconditionally rather than wait for a
+   measurement that needs a code block to be on screen. */
+.minimap-content pre {
+    padding-right: 0;
+    overflow: hidden;
+    /* A rendered <pre> inherits the body's line height, but an editor code
+       line resolves the same ratio against the smaller code font. Deriving it
+       lands on the editor's value without needing a block on screen. */
+    line-height: var(--line-height-normal, normal);
+}
+
+/* Refines the box once a real code line has been measured, for themes whose
+   code padding differs from the rendered default. */
+.minimap-content.minimap-mirror-code pre {
+    padding-left: var(--minimap-code-padding-left, 0px);
+    padding-right: var(--minimap-code-padding-right, 0px);
+    line-height: var(--minimap-code-line-height, inherit);
+    font-size: var(--minimap-code-font-size, inherit);
 }
 
 .minimap-content .markdown-minimap-blank-run {
@@ -31,16 +63,34 @@
     border: 0;
 }
 
+/* Three states, as in VS Code: barely there at rest, legible while the pointer
+   is over the minimap, strongest while dragging. The "Slider opacity" setting
+   sets the hover level and the other two are scaled from it, so one control
+   still moves all three together.
+   Only opacity transitions — top and height are rewritten on every scroll
+   event and must not lag behind the editor. */
 .minimap-slider {
     right: var(--minimap-scrollbar-gutter, 14px);
     position: absolute;
-    width: calc(100% * var(--scale));
+    width: calc(var(--minimap-doc-width, 100%) * var(--scale));
     background-color: var(--code-comment);
+    opacity: calc(var(--minimap-slider-opacity, 0.3) * 0.3);
+    transition: opacity 120ms ease-out;
     z-index: 2;
 }
 
+/* Set from the hitbox's mouseenter/mouseleave rather than a :hover rule, since
+   the container does not take pointer events itself. The :not() keeps the
+   three states mutually exclusive, so dragging wins on its own terms instead
+   of depending on rule order against a more specific hover selector. */
+.minimap-container.is-hovered .minimap-slider:not(.dragging) {
+    opacity: var(--minimap-slider-opacity, 0.3);
+}
+
+/* Applies whether or not the pointer is still over the strip, since a drag
+   continues once it leaves. */
 .minimap-slider.dragging {
-    opacity: 0.5;
+    opacity: min(1, calc(var(--minimap-slider-opacity, 0.3) * 1.8));
 }
 
 .minimap-hitbox {
@@ -50,12 +100,83 @@
     height: calc(
         100% - var(--minimap-top-offset, 0px) - var(--minimap-bottom-offset, 0px)
     );
-    width: calc(100% * var(--scale));
+    width: calc(var(--minimap-doc-width, 100%) * var(--scale));
     pointer-events: auto;
     z-index: 3;
     cursor: pointer;
 }
 
+/* Source mode: one element per source line, sized from the same variables
+   Obsidian's own Source-mode styling resolves, so the minimap reproduces the
+   note's line layout rather than a rendered version of it. */
+.minimap-content-source .minimap-source-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    /* Each line's height is copied from CodeMirror, so clip rather than let a
+       line CodeMirror has not measured yet push the panel out of step. */
+    overflow: hidden;
+}
+
+/* Frontmatter keeps the body's size and line height in Source mode; only the
+   family differs, so heights stay identical to the editor's. */
+.minimap-content-source .minimap-source-line.mod-frontmatter {
+    font-family: var(--font-monospace);
+}
+
+/* Code lines resolve the shared ratio against the smaller code font, which is
+   how the editor arrives at its own code line height. */
+.minimap-content-source .minimap-source-line.mod-code {
+    font-family: var(--font-monospace);
+    font-size: var(--code-size);
+    line-height: var(--line-height-normal, 1.5);
+    background-color: var(--code-background);
+}
+
+.minimap-content-source .minimap-source-line.mod-h1 {
+    font-size: var(--h1-size);
+    line-height: var(--h1-line-height, 1.2);
+    font-weight: var(--h1-weight, 700);
+}
+.minimap-content-source .minimap-source-line.mod-h2 {
+    font-size: var(--h2-size);
+    line-height: var(--h2-line-height, var(--h1-line-height, 1.2));
+    font-weight: var(--h2-weight, 600);
+}
+.minimap-content-source .minimap-source-line.mod-h3 {
+    font-size: var(--h3-size);
+    line-height: var(--h3-line-height, var(--h1-line-height, 1.2));
+    font-weight: var(--h3-weight, 600);
+}
+.minimap-content-source .minimap-source-line.mod-h4 {
+    font-size: var(--h4-size);
+    line-height: var(--h4-line-height, var(--h1-line-height, 1.2));
+    font-weight: var(--h4-weight, 600);
+}
+.minimap-content-source .minimap-source-line.mod-h5 {
+    font-size: var(--h5-size);
+    line-height: var(--h5-line-height, var(--h1-line-height, 1.2));
+    font-weight: var(--h5-weight, 600);
+}
+.minimap-content-source .minimap-source-line.mod-h6 {
+    font-size: var(--h6-size);
+    line-height: var(--h6-line-height, var(--h1-line-height, 1.2));
+    font-weight: var(--h6-weight, 600);
+}
+
 .minimap-disabled .minimap-container {
     display: none;
+}
+
+/* Optional breathing room between the note's text and the minimap.
+   Suggested by @2590812378 in issue #3. */
+.minimap-content-shifted:not(.minimap-disabled)
+    .markdown-source-view.mod-cm6
+    .cm-sizer,
+.minimap-content-shifted:not(.minimap-disabled)
+    .markdown-reading-view
+    .markdown-preview-sizer {
+    transform: translateX(calc(-1 * var(--minimap-content-shift, 0px)));
 }
