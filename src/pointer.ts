@@ -15,7 +15,8 @@ export interface PointerHost {
     readonly scale: number;
     readonly centerOnClick: boolean;
     getScroller(): HTMLElement | null;
-    getScrollMetrics(): ScrollMetrics;
+    /** Omit the argument for the current position, pass one to ask "what if". */
+    getScrollMetrics(scrollTop?: number): ScrollMetrics;
     /** Editor Y for a panel Y, or null when the global ratio should be used. */
     mapToEditor(minimapY: number): number | null;
     onScrolled(): void;
@@ -140,17 +141,74 @@ export class MinimapPointer {
     }
 
     /**
-     * Editor position for a point on the panel, through the same mapping that
-     * placed the thumb. Using the track ratio instead leaves the thumb a few
-     * pixels behind the pointer, because the mapping is piecewise and the
-     * ratio is not its inverse.
+     * Editor position for an absolute position in the panel, through the same
+     * mapping that placed the thumb. Using the track ratio instead leaves the
+     * thumb a few pixels behind the pointer, because the mapping is piecewise
+     * and the ratio is not its inverse.
      */
-    private panelYToScrollTop(panelLocalY: number, metrics: ScrollMetrics) {
-        const panelY = panelLocalY + metrics.minimapScrollOffset;
+    private mappedTopToScrollTop(mappedTop: number, metrics: ScrollMetrics) {
         const mapped = this.host.mapToEditor(
-            panelY / Math.max(this.host.scale, 0.001)
+            mappedTop / Math.max(this.host.scale, 0.001)
         );
-        return mapped ?? panelY / Math.max(metrics.docScale, 0.001);
+        return mapped ?? mappedTop / Math.max(metrics.docScale, 0.001);
+    }
+
+    /**
+     * Where to scroll so the thumb ends up at `trackY` once we get there.
+     *
+     * On a note long enough to pan, the panel slides as it scrolls, so the
+     * answer depends on the position being solved for. Solving with only the
+     * current pan lands short, which made repeated clicks creep toward the
+     * target instead of arriving.
+     *
+     * Panning is a fixed fraction of the thumb's travel, so thumb position is a
+     * linear function of the mapped position and can be inverted outright.
+     * Iterating instead converges slowly, because the pan chases the target
+     * almost as fast as the target moves. One refinement pass absorbs the
+     * slight variation in thumb height along the note.
+     */
+    private solveScrollTop(
+        trackY: number,
+        centered: boolean,
+        metrics: ScrollMetrics
+    ) {
+        // Without panning the thumb tracks the mapped position one to one.
+        const slopeOf = (m: ScrollMetrics) => {
+            const maxPan = Math.max(
+                0,
+                m.scaledDocumentHeight - m.activeHeight
+            );
+            const span = m.scaledDocumentHeight - m.viewportExtent;
+            const slope =
+                maxPan > 0 && span > 0
+                    ? (m.activeHeight - m.viewportExtent) / span
+                    : 1;
+            return Math.max(slope, 0.0001);
+        };
+        const wantedOf = (m: ScrollMetrics) =>
+            centered ? trackY - m.sliderHeight / 2 : trackY;
+
+        let current = metrics;
+        let mappedTop = wantedOf(current) / slopeOf(current);
+        let target = current.scrollTop;
+
+        for (let pass = 0; pass < 3; pass++) {
+            target = clamp(
+                this.mappedTopToScrollTop(mappedTop, current),
+                0,
+                current.maxScroll
+            );
+            const next = this.host.getScrollMetrics(target);
+            // Correct against where the thumb would actually land, rather than
+            // trusting the inversion: thumb height varies along the note, so
+            // the slope is only locally right.
+            const landed = next.mappedTop - next.minimapScrollOffset;
+            const error = wantedOf(next) - landed;
+            if (Math.abs(error) < 0.5) break;
+            mappedTop += error / slopeOf(next);
+            current = next;
+        }
+        return target;
     }
 
     /**
@@ -159,14 +217,11 @@ export class MinimapPointer {
      * the thumb should never move the view on its own.
      */
     private thumbScrollTop(localY: number, metrics: ScrollMetrics) {
-        return this.panelYToScrollTop(localY - this.grabOffset, metrics);
+        return this.solveScrollTop(localY - this.grabOffset, false, metrics);
     }
 
     /** Clicking the panel goes to the position under the pointer. */
     private documentScrollTop(localY: number, metrics: ScrollMetrics) {
-        const documentY = this.panelYToScrollTop(localY, metrics);
-        return this.host.centerOnClick
-            ? documentY - metrics.clientHeight / 2
-            : documentY;
+        return this.solveScrollTop(localY, this.host.centerOnClick, metrics);
     }
 }

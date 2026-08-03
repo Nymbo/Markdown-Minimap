@@ -497,7 +497,13 @@ export class Minimap implements PointerHost {
         this.onScroll();
     }
 
-    getScrollMetrics(): ScrollMetrics {
+    /**
+     * `scrollTopOverride` asks "what would the geometry be if we scrolled
+     * there", which the pointer needs because the panel pans with the scroll
+     * position. Everything else it reads — the anchors, the content offset —
+     * is independent of where the editor currently sits.
+     */
+    getScrollMetrics(scrollTopOverride?: number): ScrollMetrics {
         const scroller = this.scroller;
         const clientHeight = Math.max(scroller?.clientHeight ?? 1, 1);
         const scrollHeight = Math.max(
@@ -524,7 +530,7 @@ export class Minimap implements PointerHost {
         return computeScrollMetrics({
             clientHeight,
             scrollHeight,
-            scrollTop: scroller?.scrollTop ?? 0,
+            scrollTop: scrollTopOverride ?? scroller?.scrollTop ?? 0,
             containerHeight: this.container?.clientHeight ?? 0,
             topOffset: this.topOffset || 0,
             bottomOffset: this.bottomOffset || 0,
