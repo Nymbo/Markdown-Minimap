@@ -148,4 +148,4 @@ take different paths through the code.
 
 ## License
 
-[MIT](LICENSE) © Devan Eckert.
+[MIT](LICENSE) © Nymbo.
