@@ -422,7 +422,12 @@ export class Minimap implements PointerHost {
             return;
         }
 
-        this.applyBlankLineHeights(rendered, data.runs, editorView);
+        // Reading view collapses consecutive blank lines, so reproducing them
+        // there would add height the note does not have. Only the editing
+        // modes actually show them.
+        if (!this.isReadModeActive()) {
+            this.applyBlankLineHeights(rendered, data.runs, editorView);
+        }
         renderFrontmatter({
             rendered,
             element: this.element,

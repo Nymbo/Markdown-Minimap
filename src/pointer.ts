@@ -28,8 +28,13 @@ export class MinimapPointer {
     private readonly host: PointerHost;
     private dragging = false;
     private dragMode: DragMode = "document";
-    /** Distance from the thumb's top to where it was grabbed. */
-    private grabOffset = 0;
+    /**
+     * Where the thumb was grabbed, as a fraction of its height. The thumb
+     * resizes as it moves, because its height is the slice of the note the
+     * viewport covers; holding an absolute pixel offset instead let the
+     * grabbed point drift out from under the pointer during a fast drag.
+     */
+    private grabFraction = 0;
 
     constructor(host: PointerHost) {
         this.host = host;
@@ -72,14 +77,17 @@ export class MinimapPointer {
         slider?.classList.add("dragging");
 
         if (onThumb && slider) {
-            // Grab the thumb where it was actually clicked and keep that offset
+            // Grab the thumb where it was actually clicked and hold that point
             // for the drag. Recentring it on the pointer instead makes an
             // off-centre grab jump, then sit dead until the pointer catches up.
-            this.grabOffset =
-                event.clientY - slider.getBoundingClientRect().top;
+            const rect = slider.getBoundingClientRect();
+            this.grabFraction =
+                rect.height > 0
+                    ? (event.clientY - rect.top) / rect.height
+                    : 0;
         } else {
             // A click on the track does move the view, to that position.
-            this.grabOffset = 0;
+            this.grabFraction = 0;
             this.scrollToClientY(event.clientY);
         }
 
@@ -169,7 +177,8 @@ export class MinimapPointer {
      */
     private solveScrollTop(
         trackY: number,
-        centered: boolean,
+        /** Where on the thumb `trackY` should land, 0 = top, 0.5 = centre. */
+        offsetFraction: number,
         metrics: ScrollMetrics
     ) {
         // Without panning the thumb tracks the mapped position one to one.
@@ -185,8 +194,10 @@ export class MinimapPointer {
                     : 1;
             return Math.max(slope, 0.0001);
         };
+        // Resolved against the thumb's current height, which changes as it
+        // moves, so the grabbed point stays under the pointer.
         const wantedOf = (m: ScrollMetrics) =>
-            centered ? trackY - m.sliderHeight / 2 : trackY;
+            trackY - offsetFraction * m.sliderHeight;
 
         let current = metrics;
         let mappedTop = wantedOf(current) / slopeOf(current);
@@ -217,11 +228,15 @@ export class MinimapPointer {
      * the thumb should never move the view on its own.
      */
     private thumbScrollTop(localY: number, metrics: ScrollMetrics) {
-        return this.solveScrollTop(localY - this.grabOffset, false, metrics);
+        return this.solveScrollTop(localY, this.grabFraction, metrics);
     }
 
     /** Clicking the panel goes to the position under the pointer. */
     private documentScrollTop(localY: number, metrics: ScrollMetrics) {
-        return this.solveScrollTop(localY, this.host.centerOnClick, metrics);
+        return this.solveScrollTop(
+            localY,
+            this.host.centerOnClick ? 0.5 : 0,
+            metrics
+        );
     }
 }

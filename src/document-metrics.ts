@@ -136,6 +136,16 @@ export function mirrorDocumentMetrics(
         }
     }
 
+    // Bind the track to the editor's visible height. Left to `height: 100%` it
+    // resolves against a taller ancestor, putting the end of the track below
+    // the window where the pointer cannot reach it.
+    if (scroller && scroller.clientHeight > 0) {
+        container.style.setProperty(
+            "--minimap-track-height",
+            `${scroller.clientHeight}px`
+        );
+    }
+
     const paddingTop =
         pixels(computedStyle(scroller)?.paddingTop) +
         pixels(computedStyle(sizer)?.paddingTop);

@@ -1,6 +1,10 @@
+/* The track is bound to the editor's own visible height. `height: 100%`
+   resolves against a positioned ancestor that is taller than the editor area,
+   which pushed the bottom of the track below the window: the last stretch of
+   travel was unreachable and the marker could sit partly off screen. */
 .minimap-container {
     position: absolute;
-    height: 100%;
+    height: var(--minimap-track-height, 100%);
     width: 100%;
     pointer-events: none;
     overflow: hidden;
