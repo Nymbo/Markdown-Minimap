@@ -68,24 +68,27 @@ dragging it.
 | Top / bottom offset | Clearance for plugin toolbars or bottom chrome |
 | Scrollbar gap | Distance between the minimap and the editor's scrollbar |
 | Minimum viewport height | Floor for the viewport marker, so it stays grabbable in long notes |
-| Make room for the minimap | Moves the note's text so it stays centred in the space beside the minimap. On by default; needs readable line length |
+| Make room for the minimap | Moves the note's text so the space either side of it stays even once the minimap has taken its strip. On by default |
 | Center on click | Whether clicking the minimap centres the viewport on that point, or puts it at the top. Dragging the marker is unaffected |
 
 ### 💡 Giving the minimap room
 
-**Make room for the minimap** is on by default, and works together with
-`Settings` → `Editor` → `Readable line length`. The text shifts by exactly half
-the space the minimap covers, so the gaps either side of it stay equal at any
-zoom, font size or screen.
+**Make room for the minimap** is on by default. It measures the gap on either
+side of the text — from the pane's left edge, and from the text to the minimap —
+and shifts by half their difference, so the two come out equal at any zoom, font
+size or screen. There is no number to type in and no unit to get wrong.
 
-Without readable line length there is no margin to borrow: the text already
-fills the pane, so it is left alone rather than clipped — and it will sit under
-the minimap. Turn readable line length on, or narrow the pane, if that bothers
-you.
+The text moves into the file margin as well as the readable line length margin,
+and it is never pushed past the pane's own left edge. On a narrow pane there may
+not be enough room to make the gaps fully equal; the text moves as far as it can
+without being clipped, so it can still end up partly under the minimap. A wider
+pane, `Settings` → `Editor` → `Readable line length`, or a smaller **Scale**
+each give it more to work with.
 
 Thanks to [@2590812378](https://github.com/Nymbo/Markdown-Minimap/issues/3) for
-suggesting this, originally as a CSS snippet, and for the follow-up that led to
-it being computed rather than typed in by hand.
+suggesting this, originally as a CSS snippet, and for the follow-ups that led to
+it being computed rather than typed in by hand and then measured against the
+pane rather than the text box.
 
 ## 📌 How it works
 

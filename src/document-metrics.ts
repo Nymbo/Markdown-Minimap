@@ -1,4 +1,4 @@
-import { computedStyle, pixels } from "./utils";
+import { clamp, computedStyle, pixels } from "./utils";
 
 /**
  * Measuring the note's own layout and mirroring it onto the panel.
@@ -70,20 +70,27 @@ export interface MirrorOptions {
 }
 
 /**
- * How far the note's text should move so it is centred in the space left over
- * once the minimap has taken its strip.
+ * How far the note's text should move so the space either side of it looks
+ * even once the minimap has taken its strip.
  *
- * The text is centred between the scroller's content edges; the strip covers
- * part of the right one. Shifting left by half that overlap makes the two
- * visible gaps equal, at any resolution, font size or scale — no manual pixel
- * value to get wrong.
+ * Both gaps are measured to the pane's own edges — the left one from the
+ * scroller's border, the right one to the strip — and the shift is half their
+ * difference, which is what makes them equal. Measuring the left gap from the
+ * content box instead leaves the file margin out of the comparison, and the
+ * file margin is usually the larger half of it: the text then reads as sitting
+ * too far right even though the arithmetic balanced.
  *
- * The overlap is measured rather than derived from the strip's width: the
- * minimap container spans the whole view, while the text is centred inside the
+ * That margin is also room the text can move into. Restricting the shift to
+ * the centring margin alone left it pinned at zero whenever the line was wide
+ * enough to fill the content box, which is the common case on a narrow pane at
+ * high zoom, and the minimap simply covered the last few characters.
+ *
+ * The strip's position is measured rather than derived from its width: the
+ * minimap container spans the whole view, while the text sits inside the
  * scroller's padding, so the two right edges do not coincide.
  *
- * Clamped to the margin that actually exists, so the text can never be pushed
- * off its own left edge and clipped.
+ * Clamped to the gap that actually exists, so the text can never be pushed off
+ * the pane's left edge and clipped.
  */
 function reserveShift(
     this: void,
@@ -94,20 +101,19 @@ function reserveShift(
     if (!scroller || !sizer || stripLeft <= 0) return 0;
     const style = computedStyle(scroller);
     const rect = scroller.getBoundingClientRect();
+    const paddingLeft = pixels(style?.paddingLeft);
+    const paddingRight = pixels(style?.paddingRight);
     // clientWidth excludes the native scrollbar, the bounding rect does not.
     // Measuring the content edge from the rect would place it a scrollbar's
     // width too far right and skew the shift by half of that.
-    const contentRight =
-        rect.left + scroller.clientWidth - pixels(style?.paddingRight);
-    const available =
-        scroller.clientWidth -
-        pixels(style?.paddingLeft) -
-        pixels(style?.paddingRight);
-    // With readable line length off the text already fills the width, so there
-    // is no margin to borrow and shifting would only clip.
-    const leftMargin = Math.max(0, (available - sizer.clientWidth) / 2);
-    const overlap = contentRight - stripLeft;
-    return Math.max(0, Math.min(overlap / 2, leftMargin));
+    const innerRight = rect.left + scroller.clientWidth;
+    const available = scroller.clientWidth - paddingLeft - paddingRight;
+    // Whatever readable line length leaves over; zero once the text is wide
+    // enough to fill the content box.
+    const centring = Math.max(0, (available - sizer.clientWidth) / 2);
+    const leftGap = paddingLeft + centring;
+    const rightGap = stripLeft - (innerRight - paddingRight - centring);
+    return clamp((leftGap - rightGap) / 2, 0, leftGap);
 }
 
 /**

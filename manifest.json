@@ -4,8 +4,7 @@
     "author": "Nymbo",
     "authorUrl": "https://github.com/Nymbo",
     "description": "Add a minimap to your Markdown notes.",
-
     "minAppVersion": "1.8.10",
-    "version": "2.1.3",
+    "version": "2.1.4",
     "isDesktopOnly": false
 }

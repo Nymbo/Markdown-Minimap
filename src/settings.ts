@@ -148,7 +148,7 @@ export class MinimapSettingTab extends PluginSettingTab {
         );
         this.addToggle(
             "Make room for the minimap",
-            "Move the note's text so it stays centred in the space beside the minimap. Needs readable line length enabled; without it there is no margin to borrow and the text is left alone",
+            "Move the note's text so the space either side of it stays even once the minimap has taken its strip. Uses the file margin as well as the readable line length margin, and never moves the text past the pane's left edge",
             "reserveSpace"
         );
         this.addToggle(
