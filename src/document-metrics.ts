@@ -69,6 +69,59 @@ export interface MirrorOptions {
     reserveSpace: boolean;
 }
 
+/** Width inside an element's own padding, which is where its text wraps. */
+function innerWidth(this: void, element: HTMLElement | null): number {
+    if (!element) return 0;
+    const style = computedStyle(element);
+    return (
+        element.clientWidth -
+        pixels(style?.paddingLeft) -
+        pixels(style?.paddingRight)
+    );
+}
+
+/**
+ * The width the note's lines actually wrap at.
+ *
+ * Read from a rendered line rather than from the sizer. Obsidian's own styling
+ * applies readable line length to the sizer, so on the default theme the two
+ * agree — but a theme is free to leave the sizer at the pane's full width and
+ * constrain the blocks inside it instead, which is what Minimal does. Trusting
+ * the sizer there laid the panel out at nearly twice the note's width, so it
+ * wrapped in different places and stopped being a map of the page.
+ *
+ * Code lines carry their own inset, and the header and pusher are not text, so
+ * none of them speak for the note's width.
+ */
+function measureTextWidth(
+    this: void,
+    element: HTMLElement,
+    readMode: boolean,
+    sizer: HTMLElement | null
+): number {
+    if (readMode) {
+        for (const child of Array.from(sizer?.children ?? [])) {
+            if (
+                child.classList.contains("markdown-preview-pusher") ||
+                child.classList.contains("mod-header") ||
+                child.classList.contains("mod-footer")
+            ) {
+                continue;
+            }
+            const width = innerWidth(child as HTMLElement);
+            if (width > 0) return width;
+        }
+    } else {
+        const line = element.querySelector<HTMLElement>(
+            ".markdown-source-view .cm-line:not(.HyperMD-codeblock)"
+        );
+        const width = innerWidth(line);
+        if (width > 0) return width;
+    }
+    // An empty note, or one with nothing but code in it, still needs a width.
+    return innerWidth(sizer);
+}
+
 /**
  * How far the note's text should move so the space either side of it looks
  * even once the minimap has taken its strip.
@@ -95,10 +148,10 @@ export interface MirrorOptions {
 function reserveShift(
     this: void,
     scroller: HTMLElement | null,
-    sizer: HTMLElement | null,
+    textWidth: number,
     stripLeft: number
 ): number {
-    if (!scroller || !sizer || stripLeft <= 0) return 0;
+    if (!scroller || textWidth <= 0 || stripLeft <= 0) return 0;
     const style = computedStyle(scroller);
     const rect = scroller.getBoundingClientRect();
     const paddingLeft = pixels(style?.paddingLeft);
@@ -110,7 +163,7 @@ function reserveShift(
     const available = scroller.clientWidth - paddingLeft - paddingRight;
     // Whatever readable line length leaves over; zero once the text is wide
     // enough to fill the content box.
-    const centring = Math.max(0, (available - sizer.clientWidth) / 2);
+    const centring = Math.max(0, (available - textWidth) / 2);
     const leftGap = paddingLeft + centring;
     const rightGap = stripLeft - (innerRight - paddingRight - centring);
     return clamp((leftGap - rightGap) / 2, 0, leftGap);
@@ -130,16 +183,10 @@ export function mirrorDocumentMetrics(
         readMode
     );
 
-    if (sizer) {
-        const style = computedStyle(sizer);
-        const width =
-            sizer.clientWidth -
-            pixels(style?.paddingLeft) -
-            pixels(style?.paddingRight);
-        // A hidden pane measures 0; keep the last good width.
-        if (width > 0) {
-            container.style.setProperty("--minimap-doc-width", `${width}px`);
-        }
+    const textWidth = measureTextWidth(element, readMode, sizer);
+    // A hidden pane measures 0; keep the last good width.
+    if (textWidth > 0) {
+        container.style.setProperty("--minimap-doc-width", `${textWidth}px`);
     }
 
     // Bind the track to the editor's visible height. Left to `height: 100%` it
@@ -172,7 +219,7 @@ export function mirrorDocumentMetrics(
 
     // Published on the view element, not the panel, so it survives re-renders.
     const shift = options.reserveSpace
-        ? reserveShift(scroller, sizer, options.stripLeft)
+        ? reserveShift(scroller, textWidth, options.stripLeft)
         : 0;
     if (shift > 0) {
         element.style.setProperty("--minimap-content-shift", `${shift}px`);

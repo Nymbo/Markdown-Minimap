@@ -64,7 +64,8 @@ dragging it.
 | Enable by default | Whether new notes open with the minimap shown |
 | Scale | Size of the minimap, 0.05–0.3 of actual size |
 | Opacity | Background opacity of the minimap panel |
-| Slider opacity | Viewport marker opacity while hovering; the idle and dragging states scale from it |
+| Slider opacity | Viewport marker opacity while hovering the minimap; the dragging state scales from it |
+| Idle slider opacity | Viewport marker opacity the rest of the time; set it to 0 to hide the marker until you hover |
 | Top / bottom offset | Clearance for plugin toolbars or bottom chrome |
 | Scrollbar gap | Distance between the minimap and the editor's scrollbar |
 | Minimum viewport height | Floor for the viewport marker, so it stays grabbable in long notes |

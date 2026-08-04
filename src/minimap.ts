@@ -34,6 +34,7 @@ export class Minimap implements PointerHost {
     scale = 0.1;
     minimapOpacity = 0.3;
     sliderOpacity = 0.3;
+    sliderIdleOpacity = 0.09;
     topOffset = 0;
     bottomOffset = 0;
     scrollbarGutter = 14;
@@ -54,6 +55,12 @@ export class Minimap implements PointerHost {
     private sourceLineElements: HTMLElement[] = [];
     /** CodeMirror content height the source line heights were copied from. */
     private appliedContentHeight = -1;
+    /**
+     * Whether the last metrics pass mapped through the anchors. The thumb's
+     * position and the pointer's target have to come from the same mapping, so
+     * this is what the pointer asks rather than whether anchors merely exist.
+     */
+    private anchorsInUse = false;
 
     constructor(
         plugin: NoteMinimap,
@@ -134,6 +141,7 @@ export class Minimap implements PointerHost {
         this.scale = settings.scale;
         this.minimapOpacity = settings.minimapOpacity;
         this.sliderOpacity = settings.sliderOpacity;
+        this.sliderIdleOpacity = settings.sliderIdleOpacity;
         this.topOffset = settings.topOffset;
         this.bottomOffset = settings.bottomOffset;
         this.scrollbarGutter = settings.scrollbarGutter;
@@ -165,12 +173,16 @@ export class Minimap implements PointerHost {
                 "--minimap-scrollbar-gutter",
                 `${this.scrollbarGutter || 0}px`
             );
-            // The thumb has three states, so the setting is published as a
-            // variable the stylesheet scales rather than a fixed opacity. An
-            // inline opacity here would override every one of them.
+            // The thumb has three states, so the settings are published as
+            // variables the stylesheet resolves rather than a fixed opacity.
+            // An inline opacity here would override every one of them.
             this.container.style.setProperty(
                 "--minimap-slider-opacity",
                 String(this.sliderOpacity)
+            );
+            this.container.style.setProperty(
+                "--minimap-slider-idle-opacity",
+                String(this.sliderIdleOpacity)
             );
         }
         if (this.content)
@@ -531,6 +543,7 @@ export class Minimap implements PointerHost {
                 heights.effectiveScrollHeight,
                 heights.contentHeight
             );
+        this.anchorsInUse = usable;
 
         return computeScrollMetrics({
             clientHeight,
@@ -585,8 +598,19 @@ export class Minimap implements PointerHost {
         return this.scroller;
     }
 
+    /**
+     * Answers with the same mapping that placed the thumb, or null so the
+     * caller falls back to the global ratio.
+     *
+     * Asking whether anchors merely exist is not the same question. The panel
+     * still has headings to anchor to in reading view, but the thumb is placed
+     * by the global ratio there because reading view virtualizes its sections —
+     * and the anchors are never prepared, so their document extent stays zero
+     * and every position maps to the top of the note. Clicking the minimap in
+     * reading view therefore jumped to the top, and dragging fought the thumb.
+     */
     mapToEditor(minimapY: number): number | null {
-        return this.anchors.active ? this.anchors.toEditor(minimapY) : null;
+        return this.anchorsInUse ? this.anchors.toEditor(minimapY) : null;
     }
 
     onScrolled() {

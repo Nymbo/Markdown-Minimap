@@ -71,10 +71,11 @@
     border: 0;
 }
 
-/* Three states, as in VS Code: barely there at rest, legible while the pointer
-   is over the minimap, strongest while dragging. The "Slider opacity" setting
-   sets the hover level and the other two are scaled from it, so one control
-   still moves all three together.
+/* Three states, as in VS Code: faint at rest, legible while the pointer is over
+   the minimap, strongest while dragging. The idle and hover levels each have
+   their own setting — deriving idle from hover meant a theme dark enough to
+   need a strong idle slider got a solid block on hover. Dragging is still
+   scaled from hover, since it only has to read as "more than hover".
    Only opacity transitions — top and height are rewritten on every scroll
    event and must not lag behind the editor. */
 .minimap-slider {
@@ -82,7 +83,7 @@
     position: absolute;
     width: calc(var(--minimap-doc-width, 100%) * var(--scale));
     background-color: var(--code-comment);
-    opacity: calc(var(--minimap-slider-opacity, 0.3) * 0.3);
+    opacity: var(--minimap-slider-idle-opacity, 0.09);
     transition: opacity 120ms ease-out;
     z-index: 2;
 }

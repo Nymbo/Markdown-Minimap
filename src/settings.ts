@@ -6,6 +6,7 @@ export interface MarkdownMinimapSettings {
     scale: number;
     minimapOpacity: number;
     sliderOpacity: number;
+    sliderIdleOpacity: number;
     topOffset: number;
     bottomOffset: number;
     scrollbarGutter: number;
@@ -20,6 +21,9 @@ export function getDefaultSettings(this: void): MarkdownMinimapSettings {
         scale: 0.1,
         minimapOpacity: 0.3,
         sliderOpacity: 0.3,
+        // The idle state used to be derived as three tenths of the hover one;
+        // this is that same value, so the default look is unchanged.
+        sliderIdleOpacity: 0.09,
         topOffset: 0,
         bottomOffset: 0,
         scrollbarGutter: 14,
@@ -118,9 +122,15 @@ export class MinimapSettingTab extends PluginSettingTab {
         );
         this.addSlider(
             "Slider opacity",
-            "Slider opacity while hovering the minimap (0.05 - 1) - it fades when idle and strengthens while dragging",
+            "Slider opacity while hovering the minimap (0.05 - 1) - it strengthens further while dragging",
             "sliderOpacity",
             [0.05, 1, 0.01]
+        );
+        this.addSlider(
+            "Idle slider opacity",
+            "Slider opacity while the pointer is elsewhere (0 - 1) - set it to 0 to hide the slider until you hover",
+            "sliderIdleOpacity",
+            [0, 1, 0.01]
         );
         this.addSlider(
             "Top offset",
