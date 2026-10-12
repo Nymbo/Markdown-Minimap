@@ -3,6 +3,12 @@
    which pushed the bottom of the track below the window: the last stretch of
    travel was unreachable and the marker could sit partly off screen. */
 .minimap-container {
+    /* Published on the view for the note's own text. The panel has no use for
+       them, and stopping them here keeps a resize from restyling the panel's
+       copy of the note; see .minimap-content below. */
+    --minimap-content-shift: initial;
+    --minimap-sizer-margin-left: initial;
+    --minimap-sizer-margin-right: initial;
     position: absolute;
     height: var(--minimap-track-height, 100%);
     width: 100%;
@@ -41,7 +47,16 @@
    of its wrapper.
 
    The extra specificity intentionally overrides .markdown-preview-view's
-   height/overflow so the content keeps its natural rendered height. */
+   height/overflow so the content keeps its natural rendered height. The top
+   and bottom padding mirror the note's and are written inline.
+
+   The variables are reset here so nothing inside the rendered copy inherits
+   them. Custom properties inherit, and the copy is the whole note — tens of
+   thousands of elements on a long one — so a change to any variable it
+   inherited restyled and relaid every one of them: around 250ms on a long
+   note, for a track height that moved a pixel when the window was resized.
+   None of these are used inside the copy, so they stop here. The code metrics
+   are left alone because the copy's code blocks do use them. */
 .minimap-container .minimap-viewport > .minimap-content {
     position: relative;
     inset: auto;
@@ -50,8 +65,14 @@
     height: auto;
     max-height: none;
     overflow: visible;
-    padding: var(--minimap-doc-padding-top, 0px) 0
-        var(--minimap-doc-trailing, 0px) 0;
+    padding: 0;
+    --minimap-doc-width: initial;
+    --minimap-track-height: initial;
+    --minimap-top-offset: initial;
+    --minimap-bottom-offset: initial;
+    --minimap-scrollbar-gutter: initial;
+    --minimap-slider-opacity: initial;
+    --minimap-slider-idle-opacity: initial;
 }
 
 /* Sized to the height the properties occupy in the note itself, whether they

@@ -178,6 +178,13 @@ function fillLine(this: void, element: HTMLElement, text: string) {
     appendToken(element, rest.slice(index));
 }
 
+/**
+ * Highlighted blocks from the previous render, keyed by language and code.
+ * Prism is the slowest part of planning a Source-mode render, and an edit
+ * leaves all but one block exactly as they were.
+ */
+export type HighlightCache = Map<string, CodeRun[][] | null>;
+
 /** Highlighted code, keyed by zero-based source line index. */
 interface CodeHighlights {
     lines: Map<number, CodeRun[]>;
@@ -186,6 +193,8 @@ interface CodeHighlights {
      * loaded. The caller loads it and renders again.
      */
     pending: boolean;
+    /** Every block highlighted this time, to serve as the next render's cache. */
+    cache: HighlightCache;
 }
 
 /**
@@ -197,8 +206,16 @@ interface CodeHighlights {
  * source line count is dropped whole rather than applied at a one-line offset:
  * the panel's whole job is to line up with the note.
  */
-function collectCodeHighlights(this: void, lines: string[]): CodeHighlights {
-    const highlights: CodeHighlights = { lines: new Map(), pending: false };
+function collectCodeHighlights(
+    this: void,
+    lines: string[],
+    previous: HighlightCache
+): CodeHighlights {
+    const highlights: CodeHighlights = {
+        lines: new Map(),
+        pending: false,
+        cache: new Map(),
+    };
     const ready = isPrismReady();
 
     const apply = (first: number, last: number, language: string) => {
@@ -208,7 +225,12 @@ function collectCodeHighlights(this: void, lines: string[]): CodeHighlights {
             return;
         }
         const block = lines.slice(first, last + 1);
-        const runs = highlightCode(block.join("\n"), language);
+        const code = block.join("\n");
+        const key = `${language}\n${code}`;
+        const runs = previous.has(key)
+            ? previous.get(key) ?? null
+            : highlightCode(code, language);
+        highlights.cache.set(key, runs);
         if (!runs || runs.length !== block.length) return;
         runs.forEach((run, offset) => highlights.lines.set(first + offset, run));
     };
@@ -240,10 +262,18 @@ function fillCodeLine(this: void, element: HTMLElement, runs: CodeRun[]) {
     }
 }
 
-export interface SourceLineDom {
-    fragment: DocumentFragment;
-    /** One element per source line, index 0 being line 1. */
-    elements: HTMLElement[];
+/**
+ * What each line of a Source-mode panel should be, without building it yet.
+ *
+ * The keys describe a line completely — its kind, its text and its colouring —
+ * so two renders that agree on a line's key would build the same element for
+ * it, and the caller can keep the element it already has.
+ */
+export interface SourceLinePlan {
+    /** One per source line, index 0 being line 1. */
+    keys: string[];
+    /** Build the element for the line at a zero-based index. */
+    build(index: number): HTMLElement;
     /** Source line numbers of the headings, for anchor pairing. */
     headingLines: number[];
     /** Heading levels, parallel to `headingLines`, for resolving fold extents. */
@@ -253,20 +283,44 @@ export interface SourceLineDom {
      * loaded yet, so the caller knows a second render is worth it.
      */
     prismPending: boolean;
+    /** Pass back in on the next render. */
+    highlightCache: HighlightCache;
 }
 
-export function buildSourceLineDom(
+function runsKey(this: void, runs: CodeRun[]): string {
+    return runs
+        .map((run) => `${run.className ?? ""}\u0001${run.text}`)
+        .join("\u0002");
+}
+
+export function planSourceLines(
     this: void,
-    markdown: string
-): SourceLineDom {
+    markdown: string,
+    highlightCache: HighlightCache = new Map()
+): SourceLinePlan {
     const lines = classifySourceLines(markdown);
-    const highlights = collectCodeHighlights(markdown.split(/\r?\n/));
+    const highlights = collectCodeHighlights(
+        markdown.split(/\r?\n/),
+        highlightCache
+    );
     const headingLines: number[] = [];
     const headingLevels: number[] = [];
-    const elements: HTMLElement[] = [];
-    const fragment = activeDocument.createDocumentFragment();
 
-    lines.forEach((line, index) => {
+    const keys = lines.map((line, index) => {
+        if (line.kind === "heading") {
+            headingLines.push(index + 1);
+            headingLevels.push(line.level);
+        }
+        const runs =
+            line.kind === "code" || line.kind === "frontmatter"
+                ? highlights.lines.get(index)
+                : undefined;
+        const content = runs ? `runs\u0003${runsKey(runs)}` : line.text;
+        return `${line.kind}\u0003${line.level}\u0003${content}`;
+    });
+
+    const build = (index: number) => {
+        const line = lines[index];
         const element = activeDocument.createElement("div");
         element.className = "minimap-source-line";
         if (line.kind === "heading") {
@@ -274,14 +328,12 @@ export function buildSourceLineDom(
                 "minimap-source-heading",
                 `mod-h${line.level}`
             );
-            headingLines.push(index + 1);
-            headingLevels.push(line.level);
         } else if (line.kind === "code") {
             element.classList.add("mod-code");
         } else if (line.kind === "frontmatter") {
             element.classList.add("mod-frontmatter");
         }
-        // Code and frontmatter carry no Markdown to colour \u2014 but the editor
+        // Code and frontmatter carry no Markdown to colour — but the editor
         // still highlights what is inside them, by language, so the panel does
         // the same wherever Prism can tokenize it.
         if (line.kind === "code" || line.kind === "frontmatter") {
@@ -295,16 +347,16 @@ export function buildSourceLineDom(
         } else {
             fillLine(element, line.text);
         }
-        elements.push(element);
-        fragment.appendChild(element);
-    });
+        return element;
+    };
 
     return {
-        fragment,
-        elements,
+        keys,
+        build,
         headingLines,
         headingLevels,
         prismPending: highlights.pending,
+        highlightCache: highlights.cache,
     };
 }
 

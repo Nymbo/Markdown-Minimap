@@ -164,6 +164,15 @@ the one stretch of the panel drawn at a different scale from everything above
 it — which is what used to make the marker change size on the approach to the
 end of a long note.
 
+**Redrawing only what changed.** Rendering a whole long note is the expensive
+part — about half a second for 60,000 words — so the minimap avoids it. The note
+is cut into sections at its headings and each is rendered on its own; an edit
+redraws only the section it lands in, typically in about a millisecond, and
+switching tabs redraws nothing. A cut is only made where it cannot change the
+result: at a heading after a blank line, outside code, comments, math and raw
+HTML. A note with footnotes or reference-style links, which are resolved across
+the whole note, is never cut. Source mode does the same line by line.
+
 **Scroll mapping.** Scaling the note by a single ratio assumes the minimap grows
 at the same rate the note does, which it doesn't — small per-block differences
 accumulate into hundreds of pixels over a long note. Instead both coordinate
@@ -198,6 +207,7 @@ npm run build
 | `source-view.ts` | Source-mode line classification, highlighting and line heights |
 | `prism.ts` | Syntax highlighting for fenced code, via Obsidian's own Prism |
 | `blank-lines.ts` | Blank-line runs, frontmatter and fence scanning |
+| `sections.ts` | Cutting the note into sections that render independently |
 | `pointer.ts` | Click, drag and wheel handling |
 | `settings.ts` | Settings model and tab |
 | `utils.ts` | Small shared helpers |

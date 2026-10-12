@@ -110,6 +110,34 @@ export interface FrontmatterOptions {
     displayMode: string;
 }
 
+/**
+ * Which of `renderFrontmatter`'s outcomes applies right now, as a string that
+ * changes whenever the outcome would. The panel keeps its first section across
+ * renders, and that is where the properties are: this is how it notices the
+ * note now shows them differently — the widget where there was raw YAML, or a
+ * measured height where the pane had none — without redrawing that section on
+ * every edit. The widget's own height is left out; `syncFrontmatterHeight`
+ * follows that without a redraw.
+ */
+export function frontmatterSignature(
+    this: void,
+    options: Omit<FrontmatterOptions, "rendered">
+): string {
+    if (options.lineCount <= 0) return "none";
+    const measurement = measureFrontmatter(
+        options.element,
+        options.readMode,
+        options.editorView,
+        options.lineCount
+    );
+    if (measurement.height <= 0) {
+        return options.paneMeasurable || options.displayMode === "hidden"
+            ? "removed"
+            : "unmeasured";
+    }
+    return measurement.widget ? "widget" : `yaml:${measurement.height}`;
+}
+
 export function renderFrontmatter(
     this: void,
     options: FrontmatterOptions

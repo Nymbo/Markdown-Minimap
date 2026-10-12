@@ -1,7 +1,8 @@
 import { Component, MarkdownRenderer, MarkdownView } from "obsidian";
 import { EditorView } from "@codemirror/view";
-import { prepareBlankLineRuns } from "./blank-lines";
 import type { BlankLineRun } from "./blank-lines";
+import { prepareSections } from "./sections";
+import type { RenderSection } from "./sections";
 import {
     AnchorTracker,
     collectRenderedHeadings,
@@ -17,14 +18,13 @@ import {
     cloneMetadataWidget,
     findInlineTitle,
     findMetadataContainer,
+    frontmatterSignature,
     renderFrontmatter,
 } from "./frontmatter";
 import { MinimapPointer } from "./pointer";
 import type { PointerHost } from "./pointer";
-import {
-    applySourceLineHeights,
-    buildSourceLineDom,
-} from "./source-view";
+import { applySourceLineHeights, planSourceLines } from "./source-view";
+import type { HighlightCache } from "./source-view";
 import { isPrismReady, warmPrism } from "./prism";
 import {
     computeScrollMetrics,
@@ -33,7 +33,33 @@ import {
 import type { ScrollMetrics } from "./scroll-model";
 import type { MarkdownMinimapSettings } from "./settings";
 import type NoteMinimap from "./main";
-import { clamp, computedStyle, pixels, sleep, toRGBAAlpha } from "./utils";
+import { clamp, computedStyle, pixels, toRGBAAlpha } from "./utils";
+
+/**
+ * A section of the note as drawn in the panel, kept so that an edit elsewhere
+ * in the note can leave it exactly as it is.
+ */
+interface PanelSection {
+    markdown: string;
+    /** Zero-based first source line, as of the latest render. */
+    start: number;
+    runs: BlankLineRun[];
+    /** The section's blank-line markers, parallel to `runs`. */
+    markers: (HTMLElement | null)[];
+    /**
+     * Marks where the section begins in the panel; it runs to the next one.
+     * Holding the section's nodes instead would go wrong the moment a post
+     * processor swapped one of them for another, so a comment marks the place.
+     * Comments take no part in layout and no part in sibling selectors.
+     */
+    sentinel: Comment;
+    component: Component;
+    /**
+     * How the first section drew the properties, from `frontmatterSignature`;
+     * empty for every other section.
+     */
+    frontmatter: string;
+}
 
 export class Minimap implements PointerHost {
     plugin: NoteMinimap;
@@ -47,7 +73,6 @@ export class Minimap implements PointerHost {
     content: HTMLDivElement | null = null;
     slider: HTMLDivElement | null = null;
     hitbox: HTMLDivElement | null = null;
-    renderComponent: Component | null = null;
     scale = 0.1;
     minimapOpacity = 0.3;
     sliderOpacity = 0.3;
@@ -63,9 +88,27 @@ export class Minimap implements PointerHost {
     trailingSyncTimer = 0;
     /** Pending second measuring pass after a pane resize. */
     private resizeSettleTimer = 0;
+    /** Pending first measuring pass, shared by every caller that asks for one. */
+    private remeasureTimer = 0;
+    private pendingRemeasure: Promise<void> | null = null;
+    /**
+     * What the panel on screen was rendered from. Rendering is by far the most
+     * expensive thing the minimap does, and most requests for one change
+     * nothing: switching tabs used to re-render both the note being left and
+     * the note being opened, every time, however long they were.
+     */
+    private renderedSource: string | null = null;
+    private renderedMode = "";
+    private renderedPath = "";
+    /** Set when something the panel shows has changed outside the note. */
+    private renderStale = false;
 
     readonly anchors = new AnchorTracker();
     private readonly pointer = new MinimapPointer(this);
+    /** The panel's rendered sections, in note order. */
+    private sections: PanelSection[] = [];
+    /** File and mode the sections were rendered for; reuse needs both. */
+    private sectionsKey = "";
     /** Heading source lines from the last render, paired with the anchors. */
     private headingLines: number[] = [];
     /** Heading levels from the last render, parallel to `headingLines`. */
@@ -82,6 +125,13 @@ export class Minimap implements PointerHost {
     private codeMetricsMirrored = false;
     /** Source-mode line elements, index 0 being source line 1. */
     private sourceLineElements: HTMLElement[] = [];
+    /**
+     * What each of those elements was built from, and the file they belong to;
+     * a line whose key is unchanged keeps its element.
+     */
+    private sourceLineKeys: string[] = [];
+    private sourceLinesPath = "";
+    private highlightCache: HighlightCache = new Map();
     /** CodeMirror content height the source line heights were copied from. */
     private appliedContentHeight = -1;
     /**
@@ -282,14 +332,15 @@ export class Minimap implements PointerHost {
         this.renderVersion++; // invalidate any in-flight render
         window.clearTimeout(this.trailingSyncTimer);
         window.clearTimeout(this.resizeSettleTimer);
+        window.clearTimeout(this.remeasureTimer);
+        this.pendingRemeasure = null;
         window.clearTimeout(this.foldCheckTimer);
         this.foldObserver?.disconnect();
         this.foldObserver = null;
         this.scroller?.removeEventListener("scroll", this.onScroll);
         this.pointer.detach(this.hitbox);
 
-        this.renderComponent?.unload();
-        this.renderComponent = null;
+        this.clearSections();
         this.container?.remove();
         this.element.style.removeProperty("--minimap-content-shift");
         this.element.style.removeProperty("--minimap-sizer-margin-left");
@@ -489,41 +540,50 @@ export class Minimap implements PointerHost {
         return typeof mode === "string" ? mode : "visible";
     }
 
-    applyBlankLineHeights(
-        rendered: HTMLElement,
-        runs: BlankLineRun[],
-        editorView: EditorView | null
-    ) {
-        const editorLine =
-            this.sourceView.querySelector<HTMLElement>(".cm-line");
-        const fallbackLineHeight = editorLine
-            ? Number.parseFloat(computedStyle(editorLine)?.lineHeight ?? "")
-            : 24;
+    /**
+     * Size every section's blank-line markers from CodeMirror's line blocks.
+     * Run over the whole panel on every render, not just the sections that were
+     * redrawn: an edit above a section moves its lines, and the editor's
+     * estimates for them settle into measurements over time.
+     */
+    private applyBlankLineHeights(editorView: EditorView | null) {
         const doc = editorView?.state.doc;
-
-        for (const run of runs) {
-            const marker = rendered.querySelector<HTMLElement>(
-                `.${run.markerClass}`
+        let fallback = 24;
+        if (!editorView || !doc) {
+            const editorLine =
+                this.sourceView.querySelector<HTMLElement>(".cm-line");
+            const measured = Number.parseFloat(
+                computedStyle(editorLine)?.lineHeight ?? ""
             );
-            if (!marker) continue;
-
-            let height = 0;
-            if (editorView && doc) {
-                for (const lineNumber of run.sourceLineNumbers) {
-                    if (lineNumber > doc.lines) continue;
-                    height += editorView.lineBlockAt(
-                        doc.line(lineNumber).from
-                    ).height;
-                }
-            } else {
-                height =
-                    run.sourceLineNumbers.length *
-                    (Number.isFinite(fallbackLineHeight)
-                        ? fallbackLineHeight
-                        : 24);
-            }
-            marker.style.height = `${Math.max(0, height)}px`;
+            if (Number.isFinite(measured)) fallback = measured;
         }
+
+        for (const section of this.sections) {
+            section.runs.forEach((run, index) => {
+                const marker = section.markers[index];
+                if (!marker) return;
+                let height = 0;
+                if (editorView && doc) {
+                    for (const local of run.sourceLineNumbers) {
+                        const lineNumber = section.start + local;
+                        if (lineNumber > doc.lines) continue;
+                        height += editorView.lineBlockAt(
+                            doc.line(lineNumber).from
+                        ).height;
+                    }
+                } else {
+                    height = run.sourceLineNumbers.length * fallback;
+                }
+                marker.style.height = `${Math.max(0, height)}px`;
+            });
+        }
+    }
+
+    /** Unload every rendered section, leaving their nodes to the caller. */
+    private clearSections() {
+        for (const section of this.sections) section.component.unload();
+        this.sections = [];
+        this.sectionsKey = "";
     }
 
     // --- rendering --------------------------------------------------------
@@ -533,34 +593,88 @@ export class Minimap implements PointerHost {
      * the same CSS variables Obsidian's own Source-mode styling resolves. No
      * Markdown renderer is involved, so nothing appears that the note does not
      * show, and blank lines and frontmatter need no special handling.
+     *
+     * Lines the edit did not touch keep their elements. Rebuilding every line
+     * of a long note on each pause in typing was the slowest render of the
+     * three modes, mostly in laying the new elements out again.
      */
     renderSourceText() {
         const file = this.view.file;
         if (!file || !this.content) return;
 
-        const dom = buildSourceLineDom(this.view.getViewData());
-        this.renderComponent?.unload();
-        this.renderComponent = null;
+        const source = this.view.getViewData();
+        this.renderStale = false;
+        const plan = planSourceLines(source, this.highlightCache);
+        this.highlightCache = plan.highlightCache;
 
-        this.content.empty();
-        this.content.classList.add("minimap-content-source");
-        this.addInlineTitle(file.basename);
-        this.content.appendChild(dom.fragment);
+        const reuse =
+            this.content.classList.contains("minimap-content-source") &&
+            this.sourceLinesPath === file.path;
+        const previous = reuse ? this.sourceLineKeys : [];
+        const old = reuse ? this.sourceLineElements : [];
+        const next = plan.keys;
+        let head = 0;
+        while (
+            head < previous.length &&
+            head < next.length &&
+            previous[head] === next[head]
+        ) {
+            head++;
+        }
+        let tail = 0;
+        while (
+            tail < previous.length - head &&
+            tail < next.length - head &&
+            previous[previous.length - 1 - tail] ===
+                next[next.length - 1 - tail]
+        ) {
+            tail++;
+        }
 
-        this.sourceLineElements = dom.elements;
+        const built: HTMLElement[] = [];
+        for (let index = head; index < next.length - tail; index++) {
+            built.push(plan.build(index));
+        }
+        const fragment = activeDocument.createDocumentFragment();
+        fragment.append(...built);
+
+        if (!reuse) {
+            this.clearSections();
+            this.content.empty();
+            this.content.classList.add("minimap-content-source");
+            this.content.appendChild(fragment);
+        } else {
+            for (const element of old.slice(head, old.length - tail)) {
+                element.remove();
+            }
+            this.content.insertBefore(
+                fragment,
+                tail > 0 ? old[old.length - tail] : null
+            );
+        }
+        this.syncInlineTitle(file.basename);
+
+        this.sourceLineElements = [
+            ...old.slice(0, head),
+            ...built,
+            ...old.slice(old.length - tail),
+        ];
+        this.sourceLineKeys = next;
+        this.sourceLinesPath = file.path;
         this.appliedContentHeight = -1;
         this.refreshSourceLineHeights();
 
-        this.headingLines = dom.headingLines;
-        this.headingLevels = dom.headingLevels;
-        this.lineCount = dom.elements.length;
+        this.headingLines = plan.headingLines;
+        this.headingLevels = plan.headingLevels;
+        this.lineCount = next.length;
         this.afterRender();
+        this.recordRender(source, "source", file.path);
 
         // Obsidian only loads Prism when it first renders a code block, so a
         // session spent in Source mode may not have it yet and the code above
         // will have drawn the note's code flat. Fetch it and draw once more.
         // The re-render finds Prism loaded, so this cannot repeat.
-        if (dom.prismPending) {
+        if (plan.prismPending) {
             void warmPrism(this.plugin.app).then(() => {
                 if (!this.content || !isPrismReady()) return;
                 if (!this.isRawSourceMode()) return;
@@ -578,9 +692,53 @@ export class Minimap implements PointerHost {
         if (applied !== null) this.appliedContentHeight = applied;
     }
 
-    // Render the note's full Markdown source into the scaled minimap panel.
-    // Blank-line markers retain the source's vertical spacing without
-    // replacing Obsidian's rendered Markdown output.
+    /** Which of the three renderings the note currently calls for. */
+    private renderMode() {
+        if (this.isReadModeActive()) return "preview";
+        return this.isRawSourceMode() ? "source" : "live";
+    }
+
+    /**
+     * Whether the panel already shows what a render would produce now: the
+     * same text, in the same mode, with nothing it embeds changed since.
+     *
+     * A render made while the pane could not be measured never counts. It left
+     * out what only measurement can decide — the inline title, the height of
+     * the properties — so the first look at the pane has to redo it.
+     */
+    isRenderCurrent() {
+        return (
+            !this.renderStale &&
+            this.renderedSource !== null &&
+            this.renderedMode === this.renderMode() &&
+            this.renderedPath === this.view.file?.path &&
+            this.renderedSource === this.view.getViewData()
+        );
+    }
+
+    /** Something the panel draws, such as an embedded note, has changed. */
+    markStale() {
+        this.renderStale = true;
+    }
+
+    /**
+     * Record what was just rendered, so an identical request can be skipped.
+     * Only once the pane can be measured; see `isRenderCurrent`.
+     */
+    private recordRender(source: string, mode: string, path: string) {
+        const measurable = this.isPaneMeasurable();
+        this.renderedSource = measurable ? source : null;
+        this.renderedMode = mode;
+        this.renderedPath = path;
+    }
+
+    /**
+     * Render the note into the scaled minimap panel, redrawing only the
+     * sections whose text has changed since the last render.
+     *
+     * Blank-line markers retain the source's vertical spacing without replacing
+     * Obsidian's rendered Markdown output.
+     */
     async render() {
         const renderVersion = ++this.renderVersion;
         const file = this.view.file;
@@ -592,59 +750,166 @@ export class Minimap implements PointerHost {
         }
         this.content.classList.remove("minimap-content-source");
         this.sourceLineElements = [];
+        this.sourceLineKeys = [];
 
-        const data = prepareBlankLineRuns(this.view.getViewData());
+        const mode = this.renderMode();
+        const source = this.view.getViewData();
+        // A change to something the note embeds can sit in any section, so
+        // nothing already drawn can be trusted.
+        const stale = this.renderStale;
+        // Cleared before the await, so a change that lands while this render
+        // is in flight still marks the result stale.
+        this.renderStale = false;
+        const note = prepareSections(source);
         const editorView = this.getEditorView();
+        const frontmatterOptions = () => ({
+            element: this.element,
+            readMode: this.isReadModeActive(),
+            editorView,
+            lineCount: note.frontmatterLineCount,
+            paneMeasurable: this.isPaneMeasurable(),
+            displayMode: this.getPropertiesDisplayMode(),
+        });
 
-        const component = new Component();
-        component.load();
-        const rendered = activeDocument.createElement("div");
+        // Sections are only reusable in a panel drawn from the same file in the
+        // same mode: a link resolves against the file, and the modes size
+        // blank lines and properties differently.
+        const key = `${mode}\n${file.path}`;
+        const previous =
+            !stale && key === this.sectionsKey ? this.sections : [];
+        const next = note.sections;
+        // The first section draws the properties from a measurement, not from
+        // the text, so it is redrawn when that measurement would now come out
+        // differently even if the text has not changed.
+        const firstReusable =
+            previous.length > 0 &&
+            previous[0].frontmatter ===
+                frontmatterSignature(frontmatterOptions());
+        // Nor does a section move into or out of first place without a redraw,
+        // since the first place is the one that draws properties.
+        const reusable = (from: number, to: number) =>
+            previous[from].markdown === next[to].markdown &&
+            (from === 0 || to === 0
+                ? from === 0 && to === 0 && firstReusable
+                : true);
+        let head = 0;
+        while (
+            head < previous.length &&
+            head < next.length &&
+            reusable(head, head)
+        ) {
+            head++;
+        }
+        let tail = 0;
+        while (
+            tail < previous.length - head &&
+            tail < next.length - head &&
+            reusable(previous.length - 1 - tail, next.length - 1 - tail)
+        ) {
+            tail++;
+        }
+
+        const fresh = next
+            .slice(head, next.length - tail)
+            .map((section) => this.createSection(section));
         try {
-            await MarkdownRenderer.render(
-                this.plugin.app,
-                data.markdown,
-                rendered,
-                file.path,
-                component
+            await Promise.all(
+                fresh.map(({ section, host }) =>
+                    MarkdownRenderer.render(
+                        this.plugin.app,
+                        section.markdown,
+                        host,
+                        file.path,
+                        section.component
+                    )
+                )
             );
         } catch {
-            component.unload();
+            for (const { section } of fresh) section.component.unload();
+            this.renderStale = true;
             return;
         }
 
         // A newer render started (or we were destroyed) while awaiting
         if (renderVersion !== this.renderVersion || !this.content) {
-            component.unload();
+            for (const { section } of fresh) section.component.unload();
             return;
         }
+
+        // Only the first section can hold the frontmatter.
+        if (head === 0 && fresh.length > 0) {
+            const options = frontmatterOptions();
+            fresh[0].section.frontmatter = frontmatterSignature(options);
+            renderFrontmatter({ ...options, rendered: fresh[0].host });
+        }
+
+        const kept = previous.slice(0, head);
+        const following = previous.slice(previous.length - tail);
+        const insertBefore = following[0]?.sentinel ?? null;
+        if (previous.length === 0) {
+            // Nothing carries over, including anything a different mode or
+            // file left behind.
+            this.clearSections();
+            this.content.empty();
+        } else {
+            const replaced = previous.slice(head, previous.length - tail);
+            for (const section of replaced) section.component.unload();
+            // The replaced sections are contiguous: everything from the first
+            // one's sentinel up to the first section that stays.
+            let node: ChildNode | null = replaced[0]?.sentinel ?? null;
+            while (node && node !== insertBefore) {
+                const after: ChildNode | null = node.nextSibling;
+                node.remove();
+                node = after;
+            }
+        }
+
+        const fragment = activeDocument.createDocumentFragment();
+        for (const { section, host } of fresh) {
+            section.markers = section.runs.map((run) =>
+                host.querySelector<HTMLElement>(`.${run.markerClass}`)
+            );
+            fragment.appendChild(section.sentinel);
+            while (host.firstChild) fragment.appendChild(host.firstChild);
+        }
+        this.content.insertBefore(fragment, insertBefore);
+
+        this.sections = [
+            ...kept,
+            ...fresh.map(({ section }) => section),
+            ...following,
+        ];
+        this.sections.forEach((section, index) => {
+            section.start = next[index].start;
+        });
+        this.sectionsKey = key;
+        this.syncInlineTitle(file.basename);
 
         // Reading view collapses consecutive blank lines, so reproducing them
         // there would add height the note does not have. Only the editing
         // modes actually show them.
-        if (!this.isReadModeActive()) {
-            this.applyBlankLineHeights(rendered, data.runs, editorView);
-        }
-        renderFrontmatter({
-            rendered,
-            element: this.element,
-            readMode: this.isReadModeActive(),
-            editorView,
-            lineCount: data.frontmatterLineCount,
-            paneMeasurable: this.isPaneMeasurable(),
-            displayMode: this.getPropertiesDisplayMode(),
-        });
-        this.renderComponent?.unload();
-        this.renderComponent = component;
+        if (!this.isReadModeActive()) this.applyBlankLineHeights(editorView);
 
-        this.content.empty();
-        this.addInlineTitle(file.basename);
-        while (rendered.firstChild) {
-            this.content.appendChild(rendered.firstChild);
-        }
-
-        this.applyHeadingIndex(data.headingLines, data.headingLevels);
-        this.lineCount = data.lineCount;
+        this.applyHeadingIndex(note.headingLines, note.headingLevels);
+        this.lineCount = note.lineCount;
         this.afterRender();
+        this.recordRender(source, mode, file.path);
+    }
+
+    /** A section ready to render into its own detached host. */
+    private createSection(source: RenderSection) {
+        const component = new Component();
+        component.load();
+        const section: PanelSection = {
+            markdown: source.markdown,
+            start: source.start,
+            runs: source.runs,
+            markers: [],
+            sentinel: activeDocument.createComment("minimap-section"),
+            component,
+            frontmatter: "",
+        };
+        return { section, host: activeDocument.createElement("div") };
     }
 
     /**
@@ -678,17 +943,25 @@ export class Minimap implements PointerHost {
         this.headingLevels = cached.levels;
     }
 
-    private addInlineTitle(basename: string) {
+    /**
+     * Put the inline title at the top of the panel if the note shows one, and
+     * take it out if it does not. Re-checked on every render, since a render
+     * may keep everything else.
+     */
+    private syncInlineTitle(basename: string) {
+        if (!this.content) return;
+        this.content
+            .querySelectorAll(":scope > .minimap-inline-title")
+            .forEach((title) => title.remove());
         const inlineTitle = findInlineTitle(
             this.element,
             this.isReadModeActive()
         );
-        if (!this.content || !inlineTitle || inlineTitle.offsetHeight <= 0)
-            return;
-        this.content.createDiv({
-            cls: "inline-title minimap-inline-title",
-            text: basename,
-        });
+        if (!inlineTitle || inlineTitle.offsetHeight <= 0) return;
+        const title = activeDocument.createElement("div");
+        title.className = "inline-title minimap-inline-title";
+        title.textContent = basename;
+        this.content.prepend(title);
     }
 
     private afterRender() {
@@ -727,19 +1000,39 @@ export class Minimap implements PointerHost {
         this.updateSliderScroll();
     };
 
-    async onResize() {
-        // Wait for Obsidian's editor layout pass before measuring scroll
-        // dimensions; immediate reads can be stale after mode or pane changes.
-        await sleep(300);
-        this.remeasure();
-        // A pane that has not finished settling — a window still animating out
-        // of maximize, an edge being dragged, a sidebar collapsing — reports
-        // geometry belonging to a layout it has already left. Measuring once
-        // and trusting it is what left the panel sized for the old pane until
-        // someone pressed refresh, so take one more reading after it quietens.
-        // Issue #12.
-        window.clearTimeout(this.resizeSettleTimer);
-        this.resizeSettleTimer = window.setTimeout(this.remeasure, 400);
+    /**
+     * Schedule a measuring pass. Requests arriving while one is already pending
+     * join it rather than queueing their own: a render, a mode change and the
+     * constructor can each ask within the same few milliseconds, and every
+     * pass forces a layout of the whole panel, which on a long note is the
+     * expensive part. The pass runs after the latest of them anyway, so it
+     * sees everything each of them asked about.
+     */
+    onResize(): Promise<void> {
+        if (this.pendingRemeasure) return this.pendingRemeasure;
+        this.pendingRemeasure = new Promise<void>((resolve) => {
+            // Wait for Obsidian's editor layout pass before measuring scroll
+            // dimensions; immediate reads can be stale after mode or pane
+            // changes.
+            this.remeasureTimer = window.setTimeout(() => {
+                this.remeasureTimer = 0;
+                this.pendingRemeasure = null;
+                this.remeasure();
+                // A pane that has not finished settling — a window still
+                // animating out of maximize, an edge being dragged, a sidebar
+                // collapsing — reports geometry belonging to a layout it has
+                // already left. Measuring once and trusting it is what left the
+                // panel sized for the old pane until someone pressed refresh,
+                // so take one more reading after it quietens. Issue #12.
+                window.clearTimeout(this.resizeSettleTimer);
+                this.resizeSettleTimer = window.setTimeout(
+                    this.remeasure,
+                    400
+                );
+                resolve();
+            }, 300);
+        });
+        return this.pendingRemeasure;
     }
 
     /** One full measuring pass over the note's layout. */

@@ -1,4 +1,4 @@
-import { clamp, computedStyle, pixels } from "./utils";
+import { clamp, computedStyle, pixels, toPx } from "./utils";
 
 /**
  * Measuring the note's own layout and mirroring it onto the panel.
@@ -240,14 +240,14 @@ function applyContentShift(
         return;
     }
     const base = baseSizerMargin(element, scroller, sizer);
-    element.style.setProperty("--minimap-content-shift", `${shift}px`);
+    element.style.setProperty("--minimap-content-shift", toPx(shift));
     element.style.setProperty(
         "--minimap-sizer-margin-left",
-        `${base - shift}px`
+        toPx(base - shift)
     );
     element.style.setProperty(
         "--minimap-sizer-margin-right",
-        `${base + shift}px`
+        toPx(base + shift)
     );
     element.classList.add(SHIFTED_CLASS);
 }
@@ -301,7 +301,7 @@ export function mirrorDocumentMetrics(
     const textWidth = measureTextWidth(element, readMode, sizer);
     // A hidden pane measures 0; keep the last good width.
     if (textWidth > 0) {
-        container.style.setProperty("--minimap-doc-width", `${textWidth}px`);
+        container.style.setProperty("--minimap-doc-width", toPx(textWidth));
     }
 
     // Bind the track to the editor's visible height. Left to `height: 100%` it
@@ -317,7 +317,10 @@ export function mirrorDocumentMetrics(
     const paddingTop =
         pixels(computedStyle(scroller)?.paddingTop) +
         pixels(computedStyle(sizer)?.paddingTop);
-    container.style.setProperty("--minimap-doc-padding-top", `${paddingTop}px`);
+    // Written on the panel itself rather than published as a variable: see
+    // the stylesheet for why the panel's contents must not inherit anything
+    // that moves this often.
+    content.style.paddingTop = toPx(paddingTop);
     // The file margin below the last line, and the room Obsidian leaves for
     // scrolling past the end, are both part of the scroll range the thumb
     // travels. The panel needs its own counterpart rather than the mapping
@@ -325,9 +328,8 @@ export function mirrorDocumentMetrics(
     const editorTrailing =
         pixels(computedStyle(scroller)?.paddingBottom) +
         measureTrailingPadding(element, readMode, scroller);
-    container.style.setProperty(
-        "--minimap-doc-trailing",
-        `${scaleTrailingSpace(content, scroller, editorTrailing)}px`
+    content.style.paddingBottom = toPx(
+        scaleTrailingSpace(content, scroller, editorTrailing)
     );
 
     // Published on the view element, not the panel, so it survives re-renders.
@@ -392,11 +394,11 @@ export function mirrorCodeMetrics(
     );
     container.style.setProperty(
         "--minimap-code-padding-left",
-        `${paddingLeft}px`
+        toPx(paddingLeft)
     );
     container.style.setProperty(
         "--minimap-code-padding-right",
-        `${paddingRight}px`
+        toPx(paddingRight)
     );
     const codeLineHeight = Number.parseFloat(style?.lineHeight ?? "");
     container.style.setProperty(

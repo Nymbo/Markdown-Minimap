@@ -1,20 +1,11 @@
-import { collectHeadings } from "./anchors";
-
 export interface BlankLineRun {
     markerClass: string;
+    /**
+     * The blank lines the marker stands in for, 1-based and counted from the
+     * first line of the text that was collapsed — the whole note, or one
+     * section of it.
+     */
     sourceLineNumbers: number[];
-}
-
-export interface BlankLineRenderData {
-    markdown: string;
-    runs: BlankLineRun[];
-    frontmatterLineCount: number;
-    /** Source line numbers of headings, for anchor-based scroll mapping. */
-    headingLines: number[];
-    /** Heading levels, parallel to `headingLines`, for resolving fold extents. */
-    headingLevels: number[];
-    /** Total source lines, which bounds a fold that reaches the end. */
-    lineCount: number;
 }
 
 type Fence = {
@@ -178,14 +169,17 @@ export function getFencedCodeBlocks(
  * source lines. Insert one inert marker for each collapsed run while retaining
  * the original Markdown rendering around it. The caller sizes each marker from
  * CodeMirror's measured source-line blocks.
+ *
+ * `endsDocument` is false for a section that the rest of the note follows. A
+ * blank run at its end is then not trailing space but the gap before the next
+ * section's heading, and is collapsed exactly as it would be mid-note.
  */
-export function prepareBlankLineRuns(
+export function collapseBlankLines(
     this: void,
-    markdown: string
-): BlankLineRenderData {
-    const newline = markdown.includes("\r\n") ? "\r\n" : "\n";
-    const lines = markdown.split(/\r?\n/);
-    const protectedLines = getProtectedLines(lines);
+    lines: string[],
+    protectedLines: boolean[],
+    endsDocument = true
+): { output: string[]; runs: BlankLineRun[] } {
     const output: string[] = [];
     const runs: BlankLineRun[] = [];
 
@@ -205,7 +199,8 @@ export function prepareBlankLineRuns(
             end++;
         }
 
-        const isInternalRun = index > 0 && end < lines.length;
+        const isInternalRun =
+            index > 0 && (end < lines.length || !endsDocument);
         const firstCollapsedLine = isInternalRun ? index + 1 : index;
         const sourceLineNumbers = Array.from(
             { length: Math.max(0, end - firstCollapsedLine) },
@@ -225,13 +220,5 @@ export function prepareBlankLineRuns(
         index = end;
     }
 
-    const headings = collectHeadings(lines, protectedLines);
-    return {
-        markdown: output.join(newline),
-        runs,
-        frontmatterLineCount: getFrontmatterLineCount(lines),
-        headingLines: headings.lines,
-        headingLevels: headings.levels,
-        lineCount: lines.length,
-    };
+    return { output, runs };
 }

@@ -1,4 +1,4 @@
-import { Plugin, MarkdownView, TFile, debounce } from "obsidian";
+import { Plugin, MarkdownView, TFile, debounce, getLinkpath } from "obsidian";
 import { Minimap } from "./minimap";
 import {
     MinimapSettingTab,
@@ -95,6 +95,17 @@ export default class NoteMinimap extends Plugin {
         this.registerEvent(
             this.app.vault.on("modify", (file) => {
                 if (!(file instanceof TFile)) return;
+                // A panel is only re-rendered when its own text changes, so a
+                // note it embeds changing has to be flagged for the next look.
+                for (const note of this.minimapInstances.values()) {
+                    const source = note.view.file;
+                    if (
+                        source &&
+                        source !== file &&
+                        this.embedsFile(source, file)
+                    )
+                        note.markStale();
+                }
                 for (const leaf of this.app.workspace.getLeavesOfType(
                     "markdown"
                 )) {
@@ -302,7 +313,25 @@ export default class NoteMinimap extends Plugin {
                 attributes: true,
             });
         }
-        void noteInstance.render();
+        // Most requests — switching tabs above all — find the panel already
+        // showing this text in this mode. Re-rendering it anyway cost a full
+        // Markdown render of both notes on every switch, which with a few long
+        // notes open meant seconds of blocked UI. Measuring is all it needs.
+        if (noteInstance.isRenderCurrent()) void noteInstance.onResize();
+        else void noteInstance.render();
+    }
+
+    /** Whether `source` embeds `target`, so a change to it changes the panel. */
+    embedsFile(source: TFile, target: TFile) {
+        const embeds = this.app.metadataCache.getFileCache(source)?.embeds;
+        if (!embeds) return false;
+        return embeds.some(
+            (embed) =>
+                this.app.metadataCache.getFirstLinkpathDest(
+                    getLinkpath(embed.link),
+                    source.path
+                ) === target
+        );
     }
 
     destroyMinimapForElement(element: HTMLElement) {
