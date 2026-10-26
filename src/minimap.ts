@@ -111,6 +111,8 @@ export class Minimap implements PointerHost {
     private sectionsKey = "";
     /** Heading source lines from the last render, paired with the anchors. */
     private headingLines: number[] = [];
+    /** Image-embed source lines from the last render, one per embed. */
+    private imageLines: number[] = [];
     /** Heading levels from the last render, parallel to `headingLines`. */
     private headingLevels: number[] = [];
     /** Source line count from the last render, bounding a fold to the end. */
@@ -664,6 +666,7 @@ export class Minimap implements PointerHost {
         this.appliedContentHeight = -1;
         this.refreshSourceLineHeights();
 
+        this.imageLines = [];
         this.headingLines = plan.headingLines;
         this.headingLevels = plan.headingLevels;
         this.lineCount = next.length;
@@ -891,6 +894,7 @@ export class Minimap implements PointerHost {
         if (!this.isReadModeActive()) this.applyBlankLineHeights(editorView);
 
         this.applyHeadingIndex(note.headingLines, note.headingLevels);
+        this.imageLines = note.imageLines;
         this.lineCount = note.lineCount;
         this.afterRender();
         this.recordRender(source, mode, file.path);
@@ -975,6 +979,7 @@ export class Minimap implements PointerHost {
         this.anchors.capture(
             this.content,
             this.headingLines,
+            this.imageLines,
             this.scale,
             this.hiddenHeadings
         );
@@ -1050,6 +1055,7 @@ export class Minimap implements PointerHost {
         this.anchors.capture(
             this.content,
             this.headingLines,
+            this.imageLines,
             this.scale,
             this.hiddenHeadings
         );
@@ -1160,6 +1166,48 @@ export class Minimap implements PointerHost {
      */
     mapToEditor(minimapY: number): number | null {
         return this.anchorsInUse ? this.anchors.toEditor(minimapY) : null;
+    }
+
+    /**
+     * Take the editor to the position drawn at `localY`, as a document
+     * position rather than a scroll offset.
+     *
+     * Writing `scrollTop` directly is only accurate while CodeMirror's height
+     * map is, and for the stretch of the note it has not rendered yet it is
+     * not: an image embed is estimated at a fraction of its real height, so a
+     * note whose height is mostly images has a scroll space far shorter than
+     * the one the panel draws. A click there would land thousands of pixels
+     * short. Handing CodeMirror a position instead lets it scroll and re-measure
+     * until the target is in view.
+     *
+     * Returns false when there is nothing better than the pixel mapping:
+     * reading view, no anchors, or a position that resolves to no line.
+     */
+    jumpToPosition(
+        localY: number,
+        metrics: ScrollMetrics,
+        center: boolean
+    ): boolean {
+        if (!this.anchorsInUse) return false;
+        const editorView = this.getEditorView();
+        if (!editorView) return false;
+        // The panel is taller than the track on a long note, so it slides up as
+        // the note scrolls: what is drawn at `localY` is that much further into
+        // the note than `localY` says. Leaving the slide out of the sum is what
+        // put clicks a screen away even once the estimate was out of the way.
+        const contentY =
+            (localY + metrics.minimapScrollOffset) /
+            Math.max(this.scale, 0.001);
+        const line = this.anchors.toEditorLine(contentY);
+        if (line === null || line < 1 || line > editorView.state.doc.lines)
+            return false;
+        const pos = editorView.state.doc.line(line).from;
+        editorView.dispatch({
+            effects: EditorView.scrollIntoView(pos, {
+                y: center ? "center" : "start",
+            }),
+        });
+        return true;
     }
 
     onScrolled() {

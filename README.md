@@ -177,14 +177,43 @@ the whole note, is never cut. Source mode does the same line by line.
 at the same rate the note does, which it doesn't — small per-block differences
 accumulate into hundreds of pixels over a long note. Instead both coordinate
 spaces are anchored to positions that exist in each, and positions between them
-are interpolated. Those positions are the note's headings: ATX headings that
-start a line and setext headings (text underlined with `===` or `---`). A `#`
-inside a list item, a blockquote, a callout or an embedded note renders as a
-heading but isn't one of the note's own — Obsidian won't fold it or list it in
-the outline — so the panel skips those too and the two lists stay in step. If
-they ever disagree in count anyway, Obsidian's own heading index is consulted
-before falling back to the global ratio, rather than risking a wrong pairing.
-Reading view virtualizes its sections, so it uses the global ratio.
+are interpolated. The first of those positions are the note's headings: ATX
+headings that start a line and setext headings (text underlined with `===` or
+`---`). A `#` inside a list item, a blockquote, a callout or an embedded note
+renders as a heading but isn't one of the note's own — Obsidian won't fold it or
+list it in the outline — so the panel skips those too and the two lists stay in
+step. If they ever disagree in count anyway, Obsidian's own heading index is
+consulted before falling back to the global ratio, rather than risking a wrong
+pairing. Image embeds are measured the same way, and for the same reason; see
+below. Reading view virtualizes its sections, so it uses the global ratio.
+
+**Clicks name a position, not an offset.** A click on the panel asks the editor
+to go to the source line drawn there and lets it scroll itself, rather than
+writing a scroll offset. An offset is only as good as the editor's height map,
+and for the stretch of a note it has not rendered yet that map is an estimate:
+an image embed it has not measured is assumed to be a fraction of its height. On
+a note that is mostly screenshots the estimate can be thousands of pixels short,
+which put clicks several images away from the one they landed on. A position
+survives the estimate — the whole of an image's estimated height still belongs
+to the one line that holds it — and the editor re-measures as it scrolls, so the
+jump lands where it was asked to. Dragging the marker still moves by offset, as
+it should: the pointer is already moving and every pixel has to be followed.
+
+The panel is also taller than the track on a long note, and slides up as the
+note scrolls, so the position under the pointer is the one drawn there plus how
+far the panel has slid. That slide is part of the sum: leaving it out put clicks
+a screen away on any note long enough to pan.
+
+**Screenshots and drawings are anchors too.** A heading is not the only place
+the two sides can agree on. An image embed is drawn at its real height in the
+panel and estimated in the editor, and the two only meet again at the next
+heading; anchoring each image keeps that disagreement inside a single image
+instead of letting it accumulate across a heading's whole span, which is what a
+note made mostly of screenshots needs. The images are paired one for one, and
+the pairing is dropped the moment the counts disagree, the order inverts, or a
+section is folded — the heading anchors are still right, and a wrong pairing
+would be worse than none. Several embeds on one line share a line, and so share
+the first of their anchors.
 
 ## 🛠️ Development
 

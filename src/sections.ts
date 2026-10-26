@@ -38,6 +38,12 @@ export interface SectionedNote {
     headingLines: number[];
     /** Heading levels, parallel to `headingLines`, for resolving fold extents. */
     headingLevels: number[];
+    /**
+     * Source lines holding an image embed, one entry per embed, for the extra
+     * scroll anchors that keep a run of screenshots from being one blind
+     * stretch of the panel.
+     */
+    imageLines: number[];
     /** Total source lines, which bounds a fold that reaches the end. */
     lineCount: number;
 }
@@ -140,6 +146,40 @@ export function findSectionStarts(
     return starts;
 }
 
+/** An Obsidian image embed: `![[picture.png]]`, optionally sized or aliased. */
+const IMAGE_EMBED = /!\[\[([^\]\n|]+)(?:\|[^\]\n]*)?\]\]/g;
+
+/**
+ * Targets whose embed renders as an image in the panel. A note, a PDF or a
+ * piece of audio arrives as an embed too, without an `<img>` to anchor to.
+ */
+const IMAGE_TARGET = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i;
+
+/**
+ * Source lines holding an image embed, one entry per embed.
+ *
+ * One entry per embed rather than per line because a line may carry several —
+ * `![[a]] ![[b]] ![[c]]` — and the panel draws three elements for it. Pairing
+ * them one to one is what lets the anchors line up; the caller drops the
+ * duplicates that a shared line produces.
+ */
+export function collectImageLines(
+    this: void,
+    lines: string[],
+    protectedLines: boolean[]
+): number[] {
+    const found: number[] = [];
+    for (let index = 0; index < lines.length; index++) {
+        if (protectedLines[index]) continue;
+        IMAGE_EMBED.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = IMAGE_EMBED.exec(lines[index]))) {
+            if (IMAGE_TARGET.test(match[1].trim())) found.push(index + 1);
+        }
+    }
+    return found;
+}
+
 /**
  * The note as sections ready to render, plus the heading index the panel pairs
  * against. Blank lines are collapsed per section, with each section's markers
@@ -176,6 +216,7 @@ export function prepareSections(
         frontmatterLineCount: getFrontmatterLineCount(lines),
         headingLines: headings.lines,
         headingLevels: headings.levels,
+        imageLines: collectImageLines(lines, protectedLines),
         lineCount: lines.length,
     };
 }
