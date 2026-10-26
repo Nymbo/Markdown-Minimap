@@ -192,10 +192,10 @@ The images matter most on a note made of screenshots. The panel draws an image
 at its real height, but the editor only estimates the height of one it hasn't
 displayed yet, so the two disagree by the whole difference until the next
 anchor; anchoring each image keeps that inside a single image. Images are paired
-with the panel's by file name, in order, so an embed only one side has — a
-missing attachment, or an example inside inline code — costs that one anchor
-rather than all of them, and a note with no headings still has its images to go
-by. Several embeds on one line share a line, and so share the first of their
+with the panel's by the path they link to, in order, so an embed only one side
+has — a missing attachment draws as an empty file — costs that one anchor rather
+than all of them, and a note with no headings still has its images to go by. An
+example inside inline code or a `%%` comment draws nothing, so it isn't counted. Several embeds on one line share a line, and so share the first of their
 anchors. Reading view virtualizes its sections, so it uses the global ratio.
 
 **Clicks name a position, not an offset.** In Live Preview and Source mode, a
@@ -209,8 +209,9 @@ asked to. Within a long wrapped paragraph the click goes to the row it was on,
 not to the paragraph's first line.
 
 On a long note the panel is taller than its track and slides as the note
-scrolls, so after a click the content you clicked is centred in the editor and
-the marker moves to it — it no longer ends up under the pointer the way a
+scrolls, so after a click the content you clicked is centred in the editor (or
+put at the top, with **Center on click** off) and the marker moves to it — it no
+longer ends up under the pointer the way a
 scrollbar's thumb would. Keep the button down and the rest of the gesture is an
 ordinary marker drag, held from wherever the marker landed.
 

@@ -1,4 +1,4 @@
-import { collectHeadings, embedKey } from "./anchors";
+import { collectHeadings, embedKey, INERT_SPANS } from "./anchors";
 import type { ImageEmbed } from "./anchors";
 import type { BlankLineRun } from "./blank-lines";
 import {
@@ -150,11 +150,11 @@ export function findSectionStarts(
 /**
  * An image embed in either form Obsidian draws as an attachment:
  * `![[picture.png|300]]`, or `![alt](picture.png)`. Group 1 is a wikilink
- * target, group 2 a Markdown link target, optionally in angle brackets and
- * followed by a title.
+ * target; group 2 a Markdown link target in angle brackets, which may hold
+ * spaces; group 3 a bare one. Either Markdown form may be followed by a title.
  */
 const IMAGE_EMBED =
-    /!\[\[([^\]\n|]+)(?:\|[^\]\n]*)?\]\]|!\[[^\]\n]*\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^)\n]*["'])?\s*\)/g;
+    /!\[\[([^\]\n|]+)(?:\|[^\]\n]*)?\]\]|!\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^)\s]+))(?:\s+["'][^)\n]*["'])?\s*\)/g;
 
 /**
  * Targets whose embed renders as an image in the panel. A note, a PDF or a
@@ -164,13 +164,6 @@ const IMAGE_TARGET = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i;
 
 /** A web address, which the panel draws as a bare `<img>` with no embed. */
 const EXTERNAL_TARGET = /^[a-z][a-z0-9+.-]*:/i;
-
-/**
- * Inline code spans and same-line `%%` comments, which hold text that looks
- * like an embed but draws nothing. Replaced with spaces rather than removed so
- * the rest of the line is matched as written.
- */
-const INERT_SPANS = /(`+)[^`]*?\1|%%.*?%%/g;
 
 /**
  * The note's image embeds in document order, with the target each links to.
@@ -191,14 +184,16 @@ export function collectImageEmbeds(
         if (protectedLines[index]) continue;
         const line = lines[index];
         if (!line.includes("![")) continue;
+        // Blanked rather than removed, so the rest of the line is matched as
+        // written.
         const text = line.replace(INERT_SPANS, (span) =>
             " ".repeat(span.length)
         );
         IMAGE_EMBED.lastIndex = 0;
         let match: RegExpExecArray | null;
         while ((match = IMAGE_EMBED.exec(text))) {
-            const target = (match[1] ?? match[2] ?? "").trim();
-            if (match[2] && EXTERNAL_TARGET.test(target)) continue;
+            const target = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+            if (!match[1] && EXTERNAL_TARGET.test(target)) continue;
             const key = embedKey(target);
             if (IMAGE_TARGET.test(key)) found.push({ line: index + 1, key });
         }
