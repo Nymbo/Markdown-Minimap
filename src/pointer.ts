@@ -45,13 +45,28 @@ export class MinimapPointer {
      */
     private grabFraction = 0;
     /**
-     * A track drag asks for a destination on every frame it moves, rather than
-     * an offset: the pointer is naming a place to be, and offset scrolling only
-     * knows where that place is as well as the height map does. Coalesced to one
-     * jump a frame so a fast drag cannot queue a scroll per mouse event.
+     * The grab as a fixed distance from the thumb's top instead, for a drag
+     * that began as a track click. The pointer can then be well clear of the
+     * thumb, and a fraction that far outside it would multiply every change in
+     * the thumb's height into a jump.
      */
-    private pendingFrame = 0;
-    private pendingY = 0;
+    private grabPixels: number | null = null;
+    /**
+     * A click on the track jumps to what is drawn under the pointer, and the
+     * rest of the gesture is then a thumb drag held from where the jump left
+     * the thumb. Re-reading what is under the pointer on every move instead
+     * feeds back on itself: the jump slides the panel, which puts new content
+     * under a pointer that has not moved, and a held or slowly dragged pointer
+     * runs away down the note.
+     *
+     * CodeMirror applies the jump on its next frame, so the thumb is only
+     * where it will be grabbed one frame later. Until then the pointer is just
+     * recorded, and a release in the meantime still lands where it ended.
+     */
+    private handoffFrame = 0;
+    private handoffWindow: Window | null = null;
+    private downY = 0;
+    private lastY = 0;
 
     constructor(host: PointerHost) {
         this.host = host;
@@ -71,13 +86,15 @@ export class MinimapPointer {
         hitbox?.removeEventListener("mouseleave", this.onLeave);
         activeDocument.removeEventListener("mousemove", this.onMouseMove);
         activeDocument.removeEventListener("mouseup", this.onMouseUp);
-        this.cancelPending();
+        this.cancelHandoff();
     }
 
-    private cancelPending() {
-        if (!this.pendingFrame) return;
-        window.cancelAnimationFrame(this.pendingFrame);
-        this.pendingFrame = 0;
+    private cancelHandoff() {
+        if (this.handoffFrame) {
+            this.handoffWindow?.cancelAnimationFrame(this.handoffFrame);
+        }
+        this.handoffFrame = 0;
+        this.handoffWindow = null;
     }
 
     // Driven from the hitbox rather than a :hover rule on the container: the
@@ -94,10 +111,12 @@ export class MinimapPointer {
 
     private onMouseDown = (event: MouseEvent) => {
         event.preventDefault();
+        this.cancelHandoff();
         const slider = this.host.slider;
         const onThumb = this.isInsideSlider(event.clientY);
         this.dragging = true;
         this.dragMode = onThumb ? "thumb" : "document";
+        this.grabPixels = null;
         slider?.classList.add("dragging");
 
         if (onThumb && slider) {
@@ -112,28 +131,41 @@ export class MinimapPointer {
         } else {
             // A click on the track does move the view, to that position.
             this.grabFraction = 0;
-            this.scrollToClientY(event.clientY, true);
+            if (this.scrollToClientY(event.clientY, true)) {
+                this.downY = event.clientY;
+                this.lastY = event.clientY;
+                this.handoffWindow = activeWindow;
+                this.handoffFrame = activeWindow.requestAnimationFrame(
+                    this.handOff
+                );
+            }
         }
 
         activeDocument.addEventListener("mousemove", this.onMouseMove);
         activeDocument.addEventListener("mouseup", this.onMouseUp);
     };
 
+    /** Continue a track click as a thumb drag, from where the jump landed. */
+    private handOff = () => {
+        this.handoffFrame = 0;
+        this.handoffWindow = null;
+        // Bring the thumb to the jump before it is measured; the scroll event
+        // that would otherwise do it arrives a frame later still.
+        this.host.onScrolled();
+        const rect = this.host.slider?.getBoundingClientRect();
+        if (!rect || rect.height <= 0) return;
+        // The thumb need not be under the pointer — the panel has slid since
+        // the click — so the grab can sit outside it. What matters is that the
+        // thumb then moves exactly as far as the pointer does.
+        this.grabPixels = this.downY - rect.top;
+        this.dragMode = "thumb";
+        if (this.lastY !== this.downY) this.scrollToClientY(this.lastY);
+    };
+
     private onMouseMove = (event: MouseEvent) => {
         if (!this.dragging) return;
-        if (this.dragMode === "document") {
-            // Following the pointer by offset here would overwrite the answer
-            // the click just gave with the very estimate it exists to avoid, so
-            // a stray pixel of movement would put the jump back where it was.
-            // Re-aim instead, once a frame.
-            this.pendingY = event.clientY;
-            if (!this.pendingFrame) {
-                this.pendingFrame = window.requestAnimationFrame(() => {
-                    this.pendingFrame = 0;
-                    if (this.dragging && this.dragMode === "document")
-                        this.scrollToClientY(this.pendingY, true);
-                });
-            }
+        if (this.handoffFrame) {
+            this.lastY = event.clientY;
             return;
         }
         this.scrollToClientY(event.clientY);
@@ -141,7 +173,6 @@ export class MinimapPointer {
 
     private onMouseUp = () => {
         this.dragging = false;
-        this.cancelPending();
         this.host.slider?.classList.remove("dragging");
         activeDocument.removeEventListener("mousemove", this.onMouseMove);
         activeDocument.removeEventListener("mouseup", this.onMouseUp);
@@ -168,16 +199,18 @@ export class MinimapPointer {
 
     /**
      * `jump` asks for the document position under the pointer rather than a
-     * scroll offset computed from it. A click wants the position; a scrub wants
+     * scroll offset computed from it. A click wants the position; a drag wants
      * the offset, because the pointer is already moving and every pixel it
      * covers has to be followed.
+     *
+     * Returns true when it jumped, which leaves the scroll to CodeMirror.
      */
-    private scrollToClientY(clientY: number, jump = false) {
+    private scrollToClientY(clientY: number, jump = false): boolean {
         const container = this.host.container;
         const scroller = this.host.getScroller();
-        if (!container || !scroller) return;
+        if (!container || !scroller) return false;
         const metrics = this.host.getScrollMetrics();
-        if (metrics.maxScroll <= 0) return;
+        if (metrics.maxScroll <= 0) return false;
 
         const rect = container.getBoundingClientRect();
         const localY = clamp(
@@ -195,7 +228,7 @@ export class MinimapPointer {
             this.host.jumpToPosition(localY, metrics, this.host.centerOnClick)
         ) {
             this.host.onScrolled();
-            return;
+            return true;
         }
 
         const scrollTop =
@@ -205,6 +238,7 @@ export class MinimapPointer {
 
         scroller.scrollTop = clamp(scrollTop, 0, metrics.maxScroll);
         this.host.onScrolled();
+        return false;
     }
 
     /**
@@ -236,8 +270,8 @@ export class MinimapPointer {
      */
     private solveScrollTop(
         trackY: number,
-        /** Where on the thumb `trackY` should land, 0 = top, 0.5 = centre. */
-        offsetFraction: number,
+        /** How far below the thumb's top `trackY` lands, for a given height. */
+        grabOf: (sliderHeight: number) => number,
         metrics: ScrollMetrics
     ) {
         // Without panning the thumb tracks the mapped position one to one.
@@ -255,8 +289,7 @@ export class MinimapPointer {
         };
         // Resolved against the thumb's current height, which changes as it
         // moves, so the grabbed point stays under the pointer.
-        const wantedOf = (m: ScrollMetrics) =>
-            trackY - offsetFraction * m.sliderHeight;
+        const wantedOf = (m: ScrollMetrics) => trackY - grabOf(m.sliderHeight);
 
         let current = metrics;
         let mappedTop = wantedOf(current) / slopeOf(current);
@@ -287,14 +320,20 @@ export class MinimapPointer {
      * the thumb should never move the view on its own.
      */
     private thumbScrollTop(localY: number, metrics: ScrollMetrics) {
-        return this.solveScrollTop(localY, this.grabFraction, metrics);
+        const grabPixels = this.grabPixels;
+        return this.solveScrollTop(
+            localY,
+            (height) => grabPixels ?? this.grabFraction * height,
+            metrics
+        );
     }
 
     /** Clicking the panel goes to the position under the pointer. */
     private documentScrollTop(localY: number, metrics: ScrollMetrics) {
+        const fraction = this.host.centerOnClick ? 0.5 : 0;
         return this.solveScrollTop(
             localY,
-            this.host.centerOnClick ? 0.5 : 0,
+            (height) => fraction * height,
             metrics
         );
     }

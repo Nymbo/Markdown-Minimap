@@ -256,27 +256,120 @@ function interpolate(
     return lowTo + ratio * (highTo - lowTo);
 }
 
+/** An image embed in the note's source. */
+export interface ImageEmbed {
+    /** Source line number, 1-based. */
+    line: number;
+    /** The embedded file, as `embedKey` normalizes it. */
+    key: string;
+}
+
+/**
+ * The file an embed points at, reduced to what the source and the panel can
+ * both say about it: the panel's `src` keeps the link as written, and the
+ * source may spell the same file as a wikilink or a URL-encoded relative path.
+ * The file name alone is compared — pairing runs in document order, so two
+ * embeds of the same name still pair with their own counterparts.
+ */
+export function embedKey(this: void, target: string): string {
+    let path = target.split("|")[0].split("#")[0].trim();
+    try {
+        path = decodeURIComponent(path);
+    } catch {
+        // A stray `%` is a literal character in a wikilink; keep it as is.
+    }
+    const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    return path.slice(slash + 1).toLowerCase();
+}
+
 /**
  * The panel's own image embeds, in document order, as the counterpart to
- * `collectImageLines`.
+ * `collectImageEmbeds`.
  *
  * Only a file drawn as an image counts, and only from the note being drawn: a
- * transcluded note brings its own images, which have no line in this note to be
- * paired with, and pairing them would shift every ordinal after them.
+ * transcluded note brings its own images, which have no line in this note.
  */
 export function collectRenderedImages(
     this: void,
     content: HTMLElement | null
-): HTMLElement[] {
+): { element: HTMLElement; key: string }[] {
     if (!content) return [];
-    const images: HTMLElement[] = [];
+    const images: { element: HTMLElement; key: string }[] = [];
     content
         .querySelectorAll<HTMLElement>(".internal-embed.image-embed")
         .forEach((element) => {
             if (element.closest(".markdown-embed")) return;
-            images.push(element);
+            const src = element.getAttribute("src");
+            if (src) images.push({ element, key: embedKey(src) });
         });
     return images;
+}
+
+/** Past this many cells the alignment table costs more than it is worth. */
+const ALIGN_LIMIT = 1_000_000;
+
+/**
+ * Pair two key sequences in order, matching as many equal keys as possible.
+ * Returns `[sourceIndex, renderedIndex]` pairs, ascending in both.
+ *
+ * Either side can hold embeds the other does not: an attachment that is
+ * missing draws as an empty file embed, and the scanner cannot see everything
+ * Markdown renders. Matching by name in order keeps every embed both sides
+ * agree on and drops only the ones they don't, where pairing by count would
+ * shift every pair after the first disagreement onto the wrong line.
+ */
+export function alignEmbeds(
+    this: void,
+    source: string[],
+    rendered: string[]
+): [number, number][] {
+    const n = source.length;
+    const m = rendered.length;
+    const pairs: [number, number][] = [];
+    if (n === 0 || m === 0) return pairs;
+
+    if (n * m > ALIGN_LIMIT) {
+        // Greedy in order: right whenever the two agree, which is the norm.
+        let s = 0;
+        for (let r = 0; r < m && s < n; r++) {
+            let next = s;
+            while (next < n && source[next] !== rendered[r]) next++;
+            if (next === n) continue;
+            pairs.push([next, r]);
+            s = next + 1;
+        }
+        return pairs;
+    }
+
+    // Longest common subsequence, filled from the end so the walk below can
+    // run forwards.
+    const width = m + 1;
+    const table = new Uint32Array((n + 1) * width);
+    for (let s = n - 1; s >= 0; s--) {
+        for (let r = m - 1; r >= 0; r--) {
+            table[s * width + r] =
+                source[s] === rendered[r]
+                    ? table[(s + 1) * width + r + 1] + 1
+                    : Math.max(
+                          table[(s + 1) * width + r],
+                          table[s * width + r + 1]
+                      );
+        }
+    }
+    let s = 0;
+    let r = 0;
+    while (s < n && r < m) {
+        if (source[s] === rendered[r]) {
+            pairs.push([s, r]);
+            s++;
+            r++;
+        } else if (table[(s + 1) * width + r] >= table[s * width + r + 1]) {
+            s++;
+        } else {
+            r++;
+        }
+    }
+    return pairs;
 }
 
 export class LineAnchors {
@@ -397,7 +490,7 @@ export class AnchorTracker {
     private anchors: LineAnchors | null = null;
     private content: HTMLElement | null = null;
     private headingLines: number[] = [];
-    private imageLines: number[] = [];
+    private imageEmbeds: ImageEmbed[] = [];
     private hiddenHeadings: ReadonlySet<number> = new Set();
     private scale = 1;
     /** Panel height the current pairing was measured against. */
@@ -419,9 +512,10 @@ export class AnchorTracker {
 
     /**
      * Pair each source heading with the rendered heading at the same ordinal,
-     * then do the same for the note's image embeds. A wrong pairing would be
-     * worse than no anchors at all, so any sign the two lists disagree drops
-     * back to the global ratio.
+     * and each image embed with the panel's embed of the same file. A wrong
+     * pairing would be worse than no anchors at all, so headings that disagree
+     * in count are left out, and anchors that disagree in order drop back to
+     * the headings alone — or to the global ratio when there are none.
      *
      * `hiddenHeadings` holds the ordinals the panel has folded away. They are
      * dropped from the pairing rather than measured: a display:none heading
@@ -433,52 +527,40 @@ export class AnchorTracker {
     capture(
         content: HTMLElement | null,
         headingLines: number[],
-        imageLines: number[],
+        imageEmbeds: ImageEmbed[],
         scale: number,
         hiddenHeadings: ReadonlySet<number> = new Set()
     ) {
         this.content = content;
         this.headingLines = headingLines;
-        this.imageLines = imageLines;
+        this.imageEmbeds = imageEmbeds;
         this.hiddenHeadings = hiddenHeadings;
         this.scale = scale || 1;
         this.anchors = null;
-        if (!content || headingLines.length === 0) return;
+        if (!content) return;
+        if (headingLines.length === 0 && imageEmbeds.length === 0) return;
         // A hidden pane measures every rect at 0, which would yield a table of
         // zeroes that looks monotonic but maps everything to the top.
         if (content.clientWidth <= 0 || content.scrollHeight <= 1) return;
 
-        // Rendered Markdown yields <hN>; Source mode yields one marked line per
-        // heading. Both are in document order and pair with `headingLines`.
-        const rendered = collectRenderedHeadings(content);
-        if (rendered.length !== headingLines.length) return;
-
         const contentTop = content.getBoundingClientRect().top;
-        let samples: Sample[] = [];
-        let previous = -1;
-        for (let index = 0; index < rendered.length; index++) {
-            if (hiddenHeadings.has(index)) continue;
-            const y =
-                (rendered[index].getBoundingClientRect().top - contentTop) /
-                this.scale;
-            if (!Number.isFinite(y) || y < previous) return;
-            previous = y;
-            samples.push({ line: headingLines[index], y });
-        }
-        if (samples.length === 0) return;
+        const headings = this.headingSamples(content, headingLines, contentTop);
 
         // Screenshots are where the panel and the editor disagree most: the
         // panel draws an image at its real height, while the editor's height
         // map carries only an estimate of it until that line scrolls into view.
         // Anchoring the images themselves keeps that disagreement inside one
-        // image instead of letting it accumulate across a whole heading's span.
-        const images = this.imageSamples(content, imageLines, contentTop);
+        // image instead of letting it accumulate across a whole heading's span,
+        // and gives a note with no headings at all something to anchor to.
+        const images = this.imageSamples(content, imageEmbeds, contentTop);
+        let samples = headings;
         if (images.length > 0) {
-            const merged = mergeSamples(samples, images);
+            const merged = mergeSamples(headings, images);
             // Falling back to the headings is right: they are still correct as
             // far as they go, and this only costs the extra precision.
             if (merged) samples = merged;
         }
+        if (samples.length === 0) return;
 
         this.anchors = new LineAnchors(
             samples.map((sample) => sample.line),
@@ -488,32 +570,62 @@ export class AnchorTracker {
     }
 
     /**
-     * The panel's image embeds as source-line samples, or none when they cannot
-     * be paired with confidence.
+     * The panel's headings as source-line samples, or none when the two lists
+     * cannot be paired with confidence.
+     */
+    private headingSamples(
+        content: HTMLElement,
+        headingLines: number[],
+        contentTop: number
+    ): Sample[] {
+        if (headingLines.length === 0) return [];
+        // Rendered Markdown yields <hN>; Source mode yields one marked line per
+        // heading. Both are in document order and pair with `headingLines`.
+        const rendered = collectRenderedHeadings(content);
+        if (rendered.length !== headingLines.length) return [];
+
+        const samples: Sample[] = [];
+        let previous = -1;
+        for (let index = 0; index < rendered.length; index++) {
+            if (this.hiddenHeadings.has(index)) continue;
+            const y =
+                (rendered[index].getBoundingClientRect().top - contentTop) /
+                this.scale;
+            if (!Number.isFinite(y) || y < previous) return [];
+            previous = y;
+            samples.push({ line: headingLines[index], y });
+        }
+        return samples;
+    }
+
+    /**
+     * The panel's image embeds as source-line samples, paired with the note's
+     * by file name. An embed only one side has is left out; the rest keep
+     * their anchors.
      */
     private imageSamples(
         content: HTMLElement,
-        imageLines: number[],
+        imageEmbeds: ImageEmbed[],
         contentTop: number
     ): Sample[] {
-        if (imageLines.length === 0) return [];
-        // A fold takes its elements out of the flow, so an image inside one
-        // measures at the top of the pane and would invert its neighbours. The
-        // heading anchors bracket the fold already; leave it to them.
-        if (this.hiddenHeadings.size > 0) return [];
-        const elements = collectRenderedImages(content);
-        // One for one, or not at all. The pairing is positional, so an extra
-        // image from somewhere the scan did not see — or a scan that counted
-        // one the panel did not draw — puts every image after it on the wrong
-        // line.
-        if (elements.length !== imageLines.length) return [];
+        if (imageEmbeds.length === 0) return [];
+        const rendered = collectRenderedImages(content);
+        const pairs = alignEmbeds(
+            imageEmbeds.map((embed) => embed.key),
+            rendered.map((image) => image.key)
+        );
         const samples: Sample[] = [];
-        for (let index = 0; index < elements.length; index++) {
+        for (const [source, panel] of pairs) {
+            const element = rendered[panel].element;
+            // A fold takes its contents out of the layout, and an image inside
+            // one has no box to measure. The editor has collapsed that line
+            // too, so the anchors either side of the fold bracket it.
+            if (element.getClientRects().length === 0) continue;
             const y =
-                (elements[index].getBoundingClientRect().top - contentTop) /
+                (element.getBoundingClientRect().top - contentTop) /
                 this.scale;
-            if (!Number.isFinite(y)) return [];
-            samples.push({ line: imageLines[index], y });
+            if (!Number.isFinite(y)) continue;
+            samples.push({ line: imageEmbeds[source].line, y });
         }
         return samples;
     }
@@ -530,7 +642,7 @@ export class AnchorTracker {
         this.capture(
             this.content,
             this.headingLines,
-            this.imageLines,
+            this.imageEmbeds,
             this.scale,
             this.hiddenHeadings
         );
@@ -598,8 +710,8 @@ export class AnchorTracker {
     }
 
     /**
-     * The source line at a panel position, rather than a pixel in CodeMirror's
-     * scroll space.
+     * The document position at a panel position, rather than a pixel in
+     * CodeMirror's scroll space.
      *
      * A pixel is only meaningful while the editor's height map is right about
      * how tall the note is, and it is not: an image embed that has not been
@@ -607,12 +719,34 @@ export class AnchorTracker {
      * in pixels lands wherever the estimate happens to point. A line survives
      * that estimate — an image's whole estimated height maps back to the one
      * line that holds it — so a click can be expressed as a position the editor
-     * scrolls to itself, re-measuring as it goes.
+     * scrolls to itself, re-measuring as it goes. Returns null when there are
+     * no anchors to map through.
      */
-    toEditorLine(minimapY: number): number | null {
+    toEditorPosition(minimapY: number): number | null {
         const editorView = this.editorView;
         if (!this.anchors || !editorView) return null;
         const editorY = this.anchors.minimapToEditor(minimapY, this.resolve);
-        return this.lineAtEditorY(editorY, editorView);
+        const docY = clamp(
+            editorY - this.editorContentOffset,
+            0,
+            Math.max(0, editorView.contentHeight - 1)
+        );
+        const block = editorView.lineBlockAtHeight(docY);
+        const line = editorView.state.doc.lineAt(block.from);
+        // A long paragraph is one line wrapped over many rows, so its start can
+        // be a screen away from the row that was clicked. Within one line of
+        // text, go as far along it as the click was down its block. Anything
+        // else — an image, a table, a fold, a callout — is a widget, and a
+        // position inside one names its edge; its start is scrolled to as a
+        // whole.
+        if (
+            block.to > line.to ||
+            block.height <= 0 ||
+            line.text.includes("![")
+        ) {
+            return block.from;
+        }
+        const fraction = clamp((docY - block.top) / block.height, 0, 1);
+        return line.from + Math.round(fraction * line.length);
     }
 }

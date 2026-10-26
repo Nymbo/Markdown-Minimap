@@ -1,4 +1,5 @@
-import { collectHeadings } from "./anchors";
+import { collectHeadings, embedKey } from "./anchors";
+import type { ImageEmbed } from "./anchors";
 import type { BlankLineRun } from "./blank-lines";
 import {
     collapseBlankLines,
@@ -39,11 +40,11 @@ export interface SectionedNote {
     /** Heading levels, parallel to `headingLines`, for resolving fold extents. */
     headingLevels: number[];
     /**
-     * Source lines holding an image embed, one entry per embed, for the extra
+     * Image embeds in document order, one entry per embed, for the extra
      * scroll anchors that keep a run of screenshots from being one blind
      * stretch of the panel.
      */
-    imageLines: number[];
+    imageEmbeds: ImageEmbed[];
     /** Total source lines, which bounds a fold that reaches the end. */
     lineCount: number;
 }
@@ -146,8 +147,14 @@ export function findSectionStarts(
     return starts;
 }
 
-/** An Obsidian image embed: `![[picture.png]]`, optionally sized or aliased. */
-const IMAGE_EMBED = /!\[\[([^\]\n|]+)(?:\|[^\]\n]*)?\]\]/g;
+/**
+ * An image embed in either form Obsidian draws as an attachment:
+ * `![[picture.png|300]]`, or `![alt](picture.png)`. Group 1 is a wikilink
+ * target, group 2 a Markdown link target, optionally in angle brackets and
+ * followed by a title.
+ */
+const IMAGE_EMBED =
+    /!\[\[([^\]\n|]+)(?:\|[^\]\n]*)?\]\]|!\[[^\]\n]*\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^)\n]*["'])?\s*\)/g;
 
 /**
  * Targets whose embed renders as an image in the panel. A note, a PDF or a
@@ -155,26 +162,45 @@ const IMAGE_EMBED = /!\[\[([^\]\n|]+)(?:\|[^\]\n]*)?\]\]/g;
  */
 const IMAGE_TARGET = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i;
 
+/** A web address, which the panel draws as a bare `<img>` with no embed. */
+const EXTERNAL_TARGET = /^[a-z][a-z0-9+.-]*:/i;
+
 /**
- * Source lines holding an image embed, one entry per embed.
+ * Inline code spans and same-line `%%` comments, which hold text that looks
+ * like an embed but draws nothing. Replaced with spaces rather than removed so
+ * the rest of the line is matched as written.
+ */
+const INERT_SPANS = /(`+)[^`]*?\1|%%.*?%%/g;
+
+/**
+ * The note's image embeds in document order, with the target each links to.
  *
  * One entry per embed rather than per line because a line may carry several —
- * `![[a]] ![[b]] ![[c]]` — and the panel draws three elements for it. Pairing
- * them one to one is what lets the anchors line up; the caller drops the
- * duplicates that a shared line produces.
+ * `![[a]] ![[b]] ![[c]]` — and the panel draws three elements for it. The
+ * target is what lets them be paired with the panel's own embeds by name
+ * rather than by count, so an embed only one side sees costs that one anchor
+ * rather than all of them.
  */
-export function collectImageLines(
+export function collectImageEmbeds(
     this: void,
     lines: string[],
     protectedLines: boolean[]
-): number[] {
-    const found: number[] = [];
+): ImageEmbed[] {
+    const found: ImageEmbed[] = [];
     for (let index = 0; index < lines.length; index++) {
         if (protectedLines[index]) continue;
+        const line = lines[index];
+        if (!line.includes("![")) continue;
+        const text = line.replace(INERT_SPANS, (span) =>
+            " ".repeat(span.length)
+        );
         IMAGE_EMBED.lastIndex = 0;
         let match: RegExpExecArray | null;
-        while ((match = IMAGE_EMBED.exec(lines[index]))) {
-            if (IMAGE_TARGET.test(match[1].trim())) found.push(index + 1);
+        while ((match = IMAGE_EMBED.exec(text))) {
+            const target = (match[1] ?? match[2] ?? "").trim();
+            if (match[2] && EXTERNAL_TARGET.test(target)) continue;
+            const key = embedKey(target);
+            if (IMAGE_TARGET.test(key)) found.push({ line: index + 1, key });
         }
     }
     return found;
@@ -216,7 +242,7 @@ export function prepareSections(
         frontmatterLineCount: getFrontmatterLineCount(lines),
         headingLines: headings.lines,
         headingLevels: headings.levels,
-        imageLines: collectImageLines(lines, protectedLines),
+        imageEmbeds: collectImageEmbeds(lines, protectedLines),
         lineCount: lines.length,
     };
 }

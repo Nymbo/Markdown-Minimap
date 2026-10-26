@@ -8,6 +8,7 @@ import {
     collectRenderedHeadings,
     readCachedHeadings,
 } from "./anchors";
+import type { ImageEmbed } from "./anchors";
 import { mirrorCodeMetrics, mirrorDocumentMetrics } from "./document-metrics";
 import {
     applyFoldsToPanel,
@@ -111,8 +112,8 @@ export class Minimap implements PointerHost {
     private sectionsKey = "";
     /** Heading source lines from the last render, paired with the anchors. */
     private headingLines: number[] = [];
-    /** Image-embed source lines from the last render, one per embed. */
-    private imageLines: number[] = [];
+    /** Image embeds from the last render, paired with the panel's by name. */
+    private imageEmbeds: ImageEmbed[] = [];
     /** Heading levels from the last render, parallel to `headingLines`. */
     private headingLevels: number[] = [];
     /** Source line count from the last render, bounding a fold to the end. */
@@ -666,7 +667,7 @@ export class Minimap implements PointerHost {
         this.appliedContentHeight = -1;
         this.refreshSourceLineHeights();
 
-        this.imageLines = [];
+        this.imageEmbeds = [];
         this.headingLines = plan.headingLines;
         this.headingLevels = plan.headingLevels;
         this.lineCount = next.length;
@@ -894,7 +895,7 @@ export class Minimap implements PointerHost {
         if (!this.isReadModeActive()) this.applyBlankLineHeights(editorView);
 
         this.applyHeadingIndex(note.headingLines, note.headingLevels);
-        this.imageLines = note.imageLines;
+        this.imageEmbeds = note.imageEmbeds;
         this.lineCount = note.lineCount;
         this.afterRender();
         this.recordRender(source, mode, file.path);
@@ -979,7 +980,7 @@ export class Minimap implements PointerHost {
         this.anchors.capture(
             this.content,
             this.headingLines,
-            this.imageLines,
+            this.imageEmbeds,
             this.scale,
             this.hiddenHeadings
         );
@@ -1055,7 +1056,7 @@ export class Minimap implements PointerHost {
         this.anchors.capture(
             this.content,
             this.headingLines,
-            this.imageLines,
+            this.imageEmbeds,
             this.scale,
             this.hiddenHeadings
         );
@@ -1181,7 +1182,7 @@ export class Minimap implements PointerHost {
      * until the target is in view.
      *
      * Returns false when there is nothing better than the pixel mapping:
-     * reading view, no anchors, or a position that resolves to no line.
+     * reading view, or no anchors.
      */
     jumpToPosition(
         localY: number,
@@ -1192,16 +1193,13 @@ export class Minimap implements PointerHost {
         const editorView = this.getEditorView();
         if (!editorView) return false;
         // The panel is taller than the track on a long note, so it slides up as
-        // the note scrolls: what is drawn at `localY` is that much further into
-        // the note than `localY` says. Leaving the slide out of the sum is what
-        // put clicks a screen away even once the estimate was out of the way.
+        // the note scrolls. A click names what is drawn under the pointer now,
+        // which is `localY` plus however far the panel has slid.
         const contentY =
             (localY + metrics.minimapScrollOffset) /
             Math.max(this.scale, 0.001);
-        const line = this.anchors.toEditorLine(contentY);
-        if (line === null || line < 1 || line > editorView.state.doc.lines)
-            return false;
-        const pos = editorView.state.doc.line(line).from;
+        const pos = this.anchors.toEditorPosition(contentY);
+        if (pos === null) return false;
         editorView.dispatch({
             effects: EditorView.scrollIntoView(pos, {
                 y: center ? "center" : "start",

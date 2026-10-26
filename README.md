@@ -50,7 +50,8 @@ them in `<your vault>/.obsidian/plugins/markdown-minimap/`.
 
 Open any note and the minimap appears at the right edge of the pane.
 
-- **Click** anywhere on it to jump to that point
+- **Click** anywhere on it to jump to what is drawn there; keep the button down
+  to carry on dragging from where it landed
 - **Drag** the viewport marker to scroll continuously
 - **Scroll** over it with the wheel to scroll the note
 - **Toggle** it per note with the button in the note header, or bind
@@ -177,43 +178,41 @@ the whole note, is never cut. Source mode does the same line by line.
 at the same rate the note does, which it doesn't — small per-block differences
 accumulate into hundreds of pixels over a long note. Instead both coordinate
 spaces are anchored to positions that exist in each, and positions between them
-are interpolated. The first of those positions are the note's headings: ATX
-headings that start a line and setext headings (text underlined with `===` or
-`---`). A `#` inside a list item, a blockquote, a callout or an embedded note
-renders as a heading but isn't one of the note's own — Obsidian won't fold it or
-list it in the outline — so the panel skips those too and the two lists stay in
-step. If they ever disagree in count anyway, Obsidian's own heading index is
-consulted before falling back to the global ratio, rather than risking a wrong
-pairing. Image embeds are measured the same way, and for the same reason; see
-below. Reading view virtualizes its sections, so it uses the global ratio.
+are interpolated. Those positions are the note's headings and its images.
 
-**Clicks name a position, not an offset.** A click on the panel asks the editor
-to go to the source line drawn there and lets it scroll itself, rather than
+The headings are ATX headings that start a line and setext headings (text
+underlined with `===` or `---`). A `#` inside a list item, a blockquote, a
+callout or an embedded note renders as a heading but isn't one of the note's own
+— Obsidian won't fold it or list it in the outline — so the panel skips those too
+and the two lists stay in step. If they ever disagree in count anyway, Obsidian's
+own heading index is consulted before the headings are left out, rather than
+risking a wrong pairing.
+
+The images matter most on a note made of screenshots. The panel draws an image
+at its real height, but the editor only estimates the height of one it hasn't
+displayed yet, so the two disagree by the whole difference until the next
+anchor; anchoring each image keeps that inside a single image. Images are paired
+with the panel's by file name, in order, so an embed only one side has — a
+missing attachment, or an example inside inline code — costs that one anchor
+rather than all of them, and a note with no headings still has its images to go
+by. Several embeds on one line share a line, and so share the first of their
+anchors. Reading view virtualizes its sections, so it uses the global ratio.
+
+**Clicks name a position, not an offset.** In Live Preview and Source mode, a
+click on the panel goes to what is drawn under the pointer: it asks the editor
+for that position in the document and lets it scroll there itself, rather than
 writing a scroll offset. An offset is only as good as the editor's height map,
-and for the stretch of a note it has not rendered yet that map is an estimate:
-an image embed it has not measured is assumed to be a fraction of its height. On
-a note that is mostly screenshots the estimate can be thousands of pixels short,
-which put clicks several images away from the one they landed on. A position
-survives the estimate — the whole of an image's estimated height still belongs
-to the one line that holds it — and the editor re-measures as it scrolls, so the
-jump lands where it was asked to. Dragging the marker still moves by offset, as
-it should: the pointer is already moving and every pixel has to be followed.
+and for an image it hasn't displayed yet that map holds a fraction of the real
+height; on a note of screenshots a click computed as an offset landed several
+images away. The editor measures as it scrolls, so a position lands where it was
+asked to. Within a long wrapped paragraph the click goes to the row it was on,
+not to the paragraph's first line.
 
-The panel is also taller than the track on a long note, and slides up as the
-note scrolls, so the position under the pointer is the one drawn there plus how
-far the panel has slid. That slide is part of the sum: leaving it out put clicks
-a screen away on any note long enough to pan.
-
-**Screenshots and drawings are anchors too.** A heading is not the only place
-the two sides can agree on. An image embed is drawn at its real height in the
-panel and estimated in the editor, and the two only meet again at the next
-heading; anchoring each image keeps that disagreement inside a single image
-instead of letting it accumulate across a heading's whole span, which is what a
-note made mostly of screenshots needs. The images are paired one for one, and
-the pairing is dropped the moment the counts disagree, the order inverts, or a
-section is folded — the heading anchors are still right, and a wrong pairing
-would be worse than none. Several embeds on one line share a line, and so share
-the first of their anchors.
+On a long note the panel is taller than its track and slides as the note
+scrolls, so after a click the content you clicked is centred in the editor and
+the marker moves to it — it no longer ends up under the pointer the way a
+scrollbar's thumb would. Keep the button down and the rest of the gesture is an
+ordinary marker drag, held from wherever the marker landed.
 
 ## 🛠️ Development
 
