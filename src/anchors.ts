@@ -198,6 +198,47 @@ export interface AnchorSample {
     minimapY: number;
 }
 
+/** A source line whose panel position has been measured. */
+interface Sample {
+    /** Source line number, 1-based. */
+    line: number;
+    /** Unscaled offset of that line inside the minimap content. */
+    y: number;
+}
+
+/**
+ * Interleave two line-ordered anchor lists, keeping one sample per line.
+ *
+ * A line can hold several embeds, and the panel gives each its own height while
+ * the source gives them all one line. Two samples on one line would ask the
+ * mapping to divide by a segment of no height, so only the first is kept.
+ *
+ * Returns null when the two lists disagree about order: an inverted pairing is
+ * worse than no image anchors at all, and the caller then keeps the headings.
+ */
+function mergeSamples(
+    this: void,
+    first: Sample[],
+    second: Sample[]
+): Sample[] | null {
+    const merged: Sample[] = [];
+    let a = 0;
+    let b = 0;
+    while (a < first.length || b < second.length) {
+        const takeFirst =
+            b >= second.length ||
+            (a < first.length && first[a].line <= second[b].line);
+        const next = takeFirst ? first[a++] : second[b++];
+        const last = merged[merged.length - 1];
+        if (last) {
+            if (last.line === next.line) continue;
+            if (next.y <= last.y) return null;
+        }
+        merged.push(next);
+    }
+    return merged;
+}
+
 /** Resolves the editor-space position of the heading at `index`. */
 export type SampleResolver = (index: number) => AnchorSample | null;
 
@@ -215,10 +256,33 @@ function interpolate(
     return lowTo + ratio * (highTo - lowTo);
 }
 
-export class HeadingAnchors {
-    /** Source line number of each heading, ascending. */
+/**
+ * The panel's own image embeds, in document order, as the counterpart to
+ * `collectImageLines`.
+ *
+ * Only a file drawn as an image counts, and only from the note being drawn: a
+ * transcluded note brings its own images, which have no line in this note to be
+ * paired with, and pairing them would shift every ordinal after them.
+ */
+export function collectRenderedImages(
+    this: void,
+    content: HTMLElement | null
+): HTMLElement[] {
+    if (!content) return [];
+    const images: HTMLElement[] = [];
+    content
+        .querySelectorAll<HTMLElement>(".internal-embed.image-embed")
+        .forEach((element) => {
+            if (element.closest(".markdown-embed")) return;
+            images.push(element);
+        });
+    return images;
+}
+
+export class LineAnchors {
+    /** Source line number of each anchor, ascending. */
     readonly lines: number[];
-    /** Unscaled offset of each heading inside the minimap content, ascending. */
+    /** Unscaled offset of each anchor inside the minimap content, ascending. */
     readonly minimapY: number[];
     /** Document extents, used as the implicit first and last anchors. */
     private editorEnd = 0;
@@ -325,14 +389,15 @@ export class HeadingAnchors {
 }
 
 /**
- * Owns the live side of the mapping: pairing headings between the note and the
- * panel, keeping that pairing valid as the panel reflows, and resolving editor
- * positions from CodeMirror on demand.
+ * Owns the live side of the mapping: pairing the note's headings and image
+ * embeds with the panel's, keeping that pairing valid as the panel reflows, and
+ * resolving editor positions from CodeMirror on demand.
  */
 export class AnchorTracker {
-    private anchors: HeadingAnchors | null = null;
+    private anchors: LineAnchors | null = null;
     private content: HTMLElement | null = null;
     private headingLines: number[] = [];
+    private imageLines: number[] = [];
     private hiddenHeadings: ReadonlySet<number> = new Set();
     private scale = 1;
     /** Panel height the current pairing was measured against. */
@@ -353,9 +418,10 @@ export class AnchorTracker {
     }
 
     /**
-     * Pair each source heading with the rendered heading at the same ordinal.
-     * A wrong pairing would be worse than no anchors at all, so any sign the
-     * two lists disagree drops back to the global ratio.
+     * Pair each source heading with the rendered heading at the same ordinal,
+     * then do the same for the note's image embeds. A wrong pairing would be
+     * worse than no anchors at all, so any sign the two lists disagree drops
+     * back to the global ratio.
      *
      * `hiddenHeadings` holds the ordinals the panel has folded away. They are
      * dropped from the pairing rather than measured: a display:none heading
@@ -367,11 +433,13 @@ export class AnchorTracker {
     capture(
         content: HTMLElement | null,
         headingLines: number[],
+        imageLines: number[],
         scale: number,
         hiddenHeadings: ReadonlySet<number> = new Set()
     ) {
         this.content = content;
         this.headingLines = headingLines;
+        this.imageLines = imageLines;
         this.hiddenHeadings = hiddenHeadings;
         this.scale = scale || 1;
         this.anchors = null;
@@ -386,8 +454,7 @@ export class AnchorTracker {
         if (rendered.length !== headingLines.length) return;
 
         const contentTop = content.getBoundingClientRect().top;
-        const lines: number[] = [];
-        const minimapY: number[] = [];
+        let samples: Sample[] = [];
         let previous = -1;
         for (let index = 0; index < rendered.length; index++) {
             if (hiddenHeadings.has(index)) continue;
@@ -396,13 +463,59 @@ export class AnchorTracker {
                 this.scale;
             if (!Number.isFinite(y) || y < previous) return;
             previous = y;
-            lines.push(headingLines[index]);
-            minimapY.push(y);
+            samples.push({ line: headingLines[index], y });
         }
-        if (lines.length === 0) return;
+        if (samples.length === 0) return;
 
-        this.anchors = new HeadingAnchors(lines, minimapY);
+        // Screenshots are where the panel and the editor disagree most: the
+        // panel draws an image at its real height, while the editor's height
+        // map carries only an estimate of it until that line scrolls into view.
+        // Anchoring the images themselves keeps that disagreement inside one
+        // image instead of letting it accumulate across a whole heading's span.
+        const images = this.imageSamples(content, imageLines, contentTop);
+        if (images.length > 0) {
+            const merged = mergeSamples(samples, images);
+            // Falling back to the headings is right: they are still correct as
+            // far as they go, and this only costs the extra precision.
+            if (merged) samples = merged;
+        }
+
+        this.anchors = new LineAnchors(
+            samples.map((sample) => sample.line),
+            samples.map((sample) => sample.y)
+        );
         this.contentHeight = content.scrollHeight;
+    }
+
+    /**
+     * The panel's image embeds as source-line samples, or none when they cannot
+     * be paired with confidence.
+     */
+    private imageSamples(
+        content: HTMLElement,
+        imageLines: number[],
+        contentTop: number
+    ): Sample[] {
+        if (imageLines.length === 0) return [];
+        // A fold takes its elements out of the flow, so an image inside one
+        // measures at the top of the pane and would invert its neighbours. The
+        // heading anchors bracket the fold already; leave it to them.
+        if (this.hiddenHeadings.size > 0) return [];
+        const elements = collectRenderedImages(content);
+        // One for one, or not at all. The pairing is positional, so an extra
+        // image from somewhere the scan did not see — or a scan that counted
+        // one the panel did not draw — puts every image after it on the wrong
+        // line.
+        if (elements.length !== imageLines.length) return [];
+        const samples: Sample[] = [];
+        for (let index = 0; index < elements.length; index++) {
+            const y =
+                (elements[index].getBoundingClientRect().top - contentTop) /
+                this.scale;
+            if (!Number.isFinite(y)) return [];
+            samples.push({ line: imageLines[index], y });
+        }
+        return samples;
     }
 
     /**
@@ -417,6 +530,7 @@ export class AnchorTracker {
         this.capture(
             this.content,
             this.headingLines,
+            this.imageLines,
             this.scale,
             this.hiddenHeadings
         );
@@ -481,5 +595,24 @@ export class AnchorTracker {
     toEditor(minimapY: number): number {
         if (!this.anchors) return minimapY;
         return this.anchors.minimapToEditor(minimapY, this.resolve);
+    }
+
+    /**
+     * The source line at a panel position, rather than a pixel in CodeMirror's
+     * scroll space.
+     *
+     * A pixel is only meaningful while the editor's height map is right about
+     * how tall the note is, and it is not: an image embed that has not been
+     * rendered yet is estimated at a fraction of its height, so a jump measured
+     * in pixels lands wherever the estimate happens to point. A line survives
+     * that estimate — an image's whole estimated height maps back to the one
+     * line that holds it — so a click can be expressed as a position the editor
+     * scrolls to itself, re-measuring as it goes.
+     */
+    toEditorLine(minimapY: number): number | null {
+        const editorView = this.editorView;
+        if (!this.anchors || !editorView) return null;
+        const editorY = this.anchors.minimapToEditor(minimapY, this.resolve);
+        return this.lineAtEditorY(editorY, editorView);
     }
 }
