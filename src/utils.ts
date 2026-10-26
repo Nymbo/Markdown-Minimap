@@ -24,7 +24,6 @@ export function pixels(this: void, value: string | undefined): number {
 export function toPx(this: void, value: number): string {
     return `${Math.round(value * 100) / 100}px`;
 }
-
 export function clamp(this: void, value: number, min: number, max: number) {
     return Math.max(min, Math.min(value, max));
 }
@@ -66,29 +65,4 @@ export function throttle<TArgs extends unknown[]>(
             lastArgs = args;
         }
     };
-}
-
-export function toRGBAAlpha(this: void, color: string, alpha: number): string {
-    if (color.startsWith("#")) {
-        // hex to rgb
-        let hex = color.replace("#", "");
-        if (hex.length === 3)
-            hex = hex
-                .split("")
-                .map((x) => x + x)
-                .join("");
-        const num = parseInt(hex, 16);
-        const r = (num >> 16) & 255;
-        const g = (num >> 8) & 255;
-        const b = num & 255;
-        return `rgba(${r},${g},${b},${alpha})`;
-    } else if (color.startsWith("rgb")) {
-        // rgb or rgba
-        const nums = color.match(/[\d.]+/g);
-        if (nums && nums.length >= 3) {
-            return `rgba(${nums[0]},${nums[1]},${nums[2]},${alpha})`;
-        }
-    }
-    // fallback
-    return color;
 }

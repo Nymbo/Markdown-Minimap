@@ -34,7 +34,7 @@ import {
 import type { ScrollMetrics } from "./scroll-model";
 import type { MarkdownMinimapSettings } from "./settings";
 import type NoteMinimap from "./main";
-import { clamp, computedStyle, pixels, toRGBAAlpha } from "./utils";
+import { clamp, computedStyle, pixels } from "./utils";
 
 /**
  * A section of the note as drawn in the panel, kept so that an edit elsewhere
@@ -373,13 +373,30 @@ export class Minimap implements PointerHost {
         this.reserveSpace = settings.reserveSpace;
         this.centerOnClick = settings.centerOnClick;
 
-        this.backgroundColor = toRGBAAlpha(
-            this.element.getCssPropertyValue("background-color"),
-            this.minimapOpacity
-        );
+        this.backgroundColor = this.panelTint();
 
         this.updateSettingsInCSS();
         void this.onResize();
+    }
+
+    /**
+     * The wash the panel is tinted with.
+     *
+     * The pane's own background colour is the wrong colour to tint with: the
+     * panel lies directly on top of it, and a colour blended with itself at any
+     * alpha leaves it exactly as it was, so the setting had nothing to change.
+     * A wash of the theme's text colour always contrasts with the pane behind
+     * it — lighter on a dark theme, darker on a light one — which is what makes
+     * the panel read as a panel rather than as a gap.
+     *
+     * The wash is a fixed colour: how much of it shows is the panel's `opacity`,
+     * set alongside, rather than an alpha baked in here. Left as `color-mix` so
+     * the browser resolves whatever syntax a theme writes its colours in, and a
+     * theme that defines neither variable leaves the panel untinted instead of
+     * painting it black, which is what reading a transparent colour produced.
+     */
+    private panelTint(): string {
+        return "color-mix(in srgb, var(--text-normal, #888888) 15%, var(--background-primary, transparent))";
     }
 
     updateSettingsInCSS() {
@@ -409,8 +426,17 @@ export class Minimap implements PointerHost {
                 String(this.sliderIdleOpacity)
             );
         }
-        if (this.content)
+        if (this.content) {
             this.content.style.backgroundColor = this.backgroundColor;
+            // The whole panel fades, not just the sheet behind it: a background
+            // alpha left the map's own text and images at full strength, which
+            // read as someone else's block sitting over the note. `opacity` is
+            // the only property that reaches the rendered copy as well — a
+            // background colour cannot, by definition, touch its children.
+            this.content.style.opacity = String(
+                clamp(this.minimapOpacity, 0, 1)
+            );
+        }
         // The reserve is measured, so it is recomputed with the rest of the
         // document metrics rather than written directly from the setting.
         this.syncDocumentMetrics();

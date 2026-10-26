@@ -19,7 +19,11 @@ export function getDefaultSettings(this: void): MarkdownMinimapSettings {
     return {
         enabledByDefault: true,
         scale: 0.1,
-        minimapOpacity: 0.3,
+        // The panel fades as a whole, so this is how solid it looks rather than
+        // how much of the note shows through its background. Three tenths was
+        // chosen when only the background faded and the map stayed solid; at
+        // three tenths of the whole panel the minimap is nearly a ghost.
+        minimapOpacity: 0.7,
         sliderOpacity: 0.3,
         // The idle state used to be derived as three tenths of the hover one;
         // this is that same value, so the default look is unchanged.
@@ -131,7 +135,7 @@ export class MinimapSettingTab extends PluginSettingTab {
         );
         this.addSlider(
             "Opacity",
-            "Change the minimap's background opacity (0.05 - 1)",
+            "Change the minimap's opacity (0.05 - 1) - 0.05 leaves a barely visible ghost, 1 is solid",
             "minimapOpacity",
             [0.05, 1, 0.01]
         );

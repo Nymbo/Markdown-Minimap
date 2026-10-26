@@ -68,7 +68,7 @@ dragging it.
 | Disable on this device | Hides the minimap on this device only. Stored outside the synced settings file, so your phone and your desktop can disagree |
 | Enable by default | Whether new notes open with the minimap shown |
 | Scale | Size of the minimap, 0.05–0.3 of actual size |
-| Opacity | Background opacity of the minimap panel |
+| Opacity | How solid the minimap is. 0.05 leaves a barely visible ghost, 1 is fully opaque |
 | Slider opacity | Viewport marker opacity while hovering the minimap; the dragging state scales from it |
 | Idle slider opacity | Viewport marker opacity the rest of the time; set it to 0 to hide the marker until you hover |
 | Top / bottom offset | Clearance for plugin toolbars or bottom chrome |
@@ -109,6 +109,21 @@ iframes.
 **Faithful layout.** The panel uses the note's own text width, top margin, line
 height and font size, so lines wrap where they wrap in the note rather than at
 the pane's full width.
+
+**One panel, faded as a whole.** Opacity is the panel's own, not its
+background's. A background alpha leaves the map's text and images at full
+strength while the gaps between them go see-through, which reads as somebody
+else's block sitting over the note; `opacity` is the only property that reaches
+the rendered copy, since a background colour cannot touch its children. The
+panel is also tinted with a wash of the theme's text colour rather than with the
+pane's own background: the pane's colour is already behind it, and a colour
+blended with itself is itself at any alpha, which is what made the setting look
+broken — the slider moved and nothing changed. A text-colour wash contrasts
+either way round, paler on a dark theme and darker on a light one, so the panel
+still reads as a panel at full opacity. The colour is expressed as `color-mix`
+and resolved by the browser, so whatever syntax a theme writes its colours in
+still works, and a theme that defines neither variable leaves the panel untinted
+rather than black.
 
 **Source mode shows source.** With Live Preview off, Obsidian prints the file
 verbatim. The minimap does the same — one element per source line, taking each
