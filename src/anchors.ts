@@ -204,6 +204,8 @@ interface Sample {
     line: number;
     /** Unscaled offset of that line inside the minimap content. */
     y: number;
+    /** For an image, the unscaled offset of its bottom edge. */
+    bottom?: number;
 }
 
 /**
@@ -265,11 +267,10 @@ export interface ImageEmbed {
 }
 
 /**
- * The file an embed points at, reduced to what the source and the panel can
- * both say about it: the panel's `src` keeps the link as written, and the
- * source may spell the same file as a wikilink or a URL-encoded relative path.
- * The file name alone is compared — pairing runs in document order, so two
- * embeds of the same name still pair with their own counterparts.
+ * The file an embed points at, as both the source and the panel spell it: the
+ * panel's `src` keeps the link as written, so the two only need the size,
+ * alias and heading stripped, URL escapes decoded and case folded to agree.
+ * The whole path is kept, so `a/shot.png` and `b/shot.png` stay distinct.
  */
 export function embedKey(this: void, target: string): string {
     let path = target.split("|")[0].split("#")[0].trim();
@@ -278,9 +279,17 @@ export function embedKey(this: void, target: string): string {
     } catch {
         // A stray `%` is a literal character in a wikilink; keep it as is.
     }
-    const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-    return path.slice(slash + 1).toLowerCase();
+    return path
+        .replace(/\\/g, "/")
+        .replace(/^(?:\.\/)+/, "")
+        .toLowerCase();
 }
+
+/**
+ * Inline code spans and same-line `%%` comments, which hold text that looks
+ * like an embed but draws nothing.
+ */
+export const INERT_SPANS = /(`+)[^`]*?\1|%%.*?%%/g;
 
 /**
  * The panel's own image embeds, in document order, as the counterpart to
@@ -491,6 +500,8 @@ export class AnchorTracker {
     private content: HTMLElement | null = null;
     private headingLines: number[] = [];
     private imageEmbeds: ImageEmbed[] = [];
+    /** The panel extent of each anchored image, for clicks that land on one. */
+    private imageBoxes: Required<Sample>[] = [];
     private hiddenHeadings: ReadonlySet<number> = new Set();
     private scale = 1;
     /** Panel height the current pairing was measured against. */
@@ -537,6 +548,7 @@ export class AnchorTracker {
         this.hiddenHeadings = hiddenHeadings;
         this.scale = scale || 1;
         this.anchors = null;
+        this.imageBoxes = [];
         if (!content) return;
         if (headingLines.length === 0 && imageEmbeds.length === 0) return;
         // A hidden pane measures every rect at 0, which would yield a table of
@@ -565,6 +577,9 @@ export class AnchorTracker {
         this.anchors = new LineAnchors(
             samples.map((sample) => sample.line),
             samples.map((sample) => sample.y)
+        );
+        this.imageBoxes = samples.filter(
+            (sample): sample is Required<Sample> => sample.bottom !== undefined
         );
         this.contentHeight = content.scrollHeight;
     }
@@ -616,16 +631,22 @@ export class AnchorTracker {
         );
         const samples: Sample[] = [];
         for (const [source, panel] of pairs) {
-            const element = rendered[panel].element;
+            // The embed is an inline span, and its box is the line of text the
+            // image sits on — at the image's foot. The editor anchors the line
+            // at its top, so measure the image itself: anchoring one side at
+            // the top and the other at the bottom swung the mapping's slope
+            // across every image, and the marker's height with it.
+            const embed = rendered[panel].element;
+            const element = embed.querySelector("img") ?? embed;
             // A fold takes its contents out of the layout, and an image inside
             // one has no box to measure. The editor has collapsed that line
             // too, so the anchors either side of the fold bracket it.
             if (element.getClientRects().length === 0) continue;
-            const y =
-                (element.getBoundingClientRect().top - contentTop) /
-                this.scale;
-            if (!Number.isFinite(y)) continue;
-            samples.push({ line: imageEmbeds[source].line, y });
+            const rect = element.getBoundingClientRect();
+            const y = (rect.top - contentTop) / this.scale;
+            const bottom = (rect.bottom - contentTop) / this.scale;
+            if (!Number.isFinite(y) || !Number.isFinite(bottom)) continue;
+            samples.push({ line: imageEmbeds[source].line, y, bottom });
         }
         return samples;
     }
@@ -725,6 +746,17 @@ export class AnchorTracker {
     toEditorPosition(minimapY: number): number | null {
         const editorView = this.editorView;
         if (!this.anchors || !editorView) return null;
+        // A click on an image means that image. Interpolating to it instead
+        // goes through the editor's estimate of its height, which for one it
+        // hasn't displayed yet can be a fraction of the real thing, and a click
+        // low on the image then lands on the text after it.
+        const doc = editorView.state.doc;
+        for (const box of this.imageBoxes) {
+            if (box.y > minimapY) break;
+            if (minimapY <= box.bottom && box.line <= doc.lines) {
+                return doc.line(box.line).from;
+            }
+        }
         const editorY = this.anchors.minimapToEditor(minimapY, this.resolve);
         const docY = clamp(
             editorY - this.editorContentOffset,
@@ -732,7 +764,7 @@ export class AnchorTracker {
             Math.max(0, editorView.contentHeight - 1)
         );
         const block = editorView.lineBlockAtHeight(docY);
-        const line = editorView.state.doc.lineAt(block.from);
+        const line = doc.lineAt(block.from);
         // A long paragraph is one line wrapped over many rows, so its start can
         // be a screen away from the row that was clicked. Within one line of
         // text, go as far along it as the click was down its block. Anything
@@ -742,7 +774,7 @@ export class AnchorTracker {
         if (
             block.to > line.to ||
             block.height <= 0 ||
-            line.text.includes("![")
+            line.text.replace(INERT_SPANS, "").includes("![")
         ) {
             return block.from;
         }
