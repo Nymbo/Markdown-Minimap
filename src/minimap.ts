@@ -790,7 +790,7 @@ export class Minimap implements PointerHost {
         // Cleared before the await, so a change that lands while this render
         // is in flight still marks the result stale.
         this.renderStale = false;
-        const note = prepareSections(source);
+        const note = prepareSections(source, mode === "live");
         const editorView = this.getEditorView();
         const frontmatterOptions = () => ({
             element: this.element,
@@ -1111,15 +1111,27 @@ export class Minimap implements PointerHost {
 
         this.anchors.revalidate(heights.contentHeight);
         // Reading view virtualizes its sections, so anchors never apply there.
+        const editorView = this.getEditorView();
+        const contentOffset = this.getEditorContentOffset();
         const usable =
             !this.isReadModeActive() &&
             this.anchors.prepare(
-                this.getEditorView(),
-                this.getEditorContentOffset(),
+                editorView,
+                contentOffset,
                 heights.effectiveScrollHeight,
                 heights.contentHeight
             );
         this.anchorsInUse = usable;
+        // The lines CodeMirror has rendered are the ones whose heights it has
+        // measured; everywhere else it is estimating.
+        let measuredRange: [number, number] | null = null;
+        if (usable && editorView) {
+            const { from, to } = editorView.viewport;
+            measuredRange = [
+                editorView.lineBlockAt(from).top + contentOffset,
+                editorView.lineBlockAt(to).bottom + contentOffset,
+            ];
+        }
 
         return computeScrollMetrics({
             clientHeight,
@@ -1133,6 +1145,7 @@ export class Minimap implements PointerHost {
             scale: this.scale,
             minViewportHeight: this.minViewportHeight,
             mapToMinimap: usable ? this.anchors.toMinimap : null,
+            measuredRange,
         });
     }
 
