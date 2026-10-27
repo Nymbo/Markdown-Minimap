@@ -1,6 +1,6 @@
 {
   "name": "markdown-minimap",
-  "version": "2.8.1",
+  "version": "2.9.0",
   "description": "Add a minimap to your Markdown notes.",
   "author": "Nymbo",
   "main": "main.js",
