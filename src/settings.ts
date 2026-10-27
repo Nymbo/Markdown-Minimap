@@ -5,6 +5,7 @@ export interface MarkdownMinimapSettings {
     enabledByDefault: boolean;
     scale: number;
     minimapOpacity: number;
+    panelTint: boolean;
     sliderOpacity: number;
     sliderIdleOpacity: number;
     topOffset: number;
@@ -21,17 +22,18 @@ export interface MarkdownMinimapSettings {
  * Bumped whenever a saved setting changes meaning. Settings saved before the
  * field existed read as version 0.
  */
-const SETTINGS_VERSION = 1;
+const SETTINGS_VERSION = 2;
 
 export function getDefaultSettings(this: void): MarkdownMinimapSettings {
     return {
         enabledByDefault: true,
         scale: 0.1,
-        // The panel fades as a whole, so this is how solid it looks rather than
-        // how much of the note shows through its background. Three tenths was
-        // chosen when only the background faded and the map stayed solid; at
-        // three tenths of the whole panel the minimap is nearly a ghost.
-        minimapOpacity: 0.7,
+        // The panel fades as a whole, so anything below 1 washes out the map's
+        // own text too. Solid by default, which is how it looked before the
+        // setting faded the whole panel; the fade is there for those who want it.
+        minimapOpacity: 1,
+        // Off by default for the same reason: the grey wash fogs the map over.
+        panelTint: false,
         sliderOpacity: 0.3,
         // The idle state used to be derived as three tenths of the hover one;
         // this is that same value, so the default look is unchanged.
@@ -61,16 +63,15 @@ export function migrateSettings(
 ): Partial<MarkdownMinimapSettings> | null {
     if ((saved.settingsVersion ?? 0) >= SETTINGS_VERSION) return null;
     const migrated = { ...saved, settingsVersion: SETTINGS_VERSION };
+    const version = saved.settingsVersion ?? 0;
     // Version 1: Opacity fades the whole panel rather than only its
     // background. The old value faded a background drawn over its own colour,
-    // so it changed nothing on screen; read as the new opacity, the old default
-    // of 0.3 is close to invisible. Raised to the new default, which is meant
-    // to look like the old one did.
-    if (
-        typeof saved.minimapOpacity === "number" &&
-        saved.minimapOpacity < 0.7
-    )
-        migrated.minimapOpacity = 0.7;
+    // so it changed nothing on screen: what those users saw was a solid panel.
+    if (version < 1) migrated.minimapOpacity = 1;
+    // Version 2: solid became the default again. Version 1 raised everyone to
+    // 0.7, the default then, so 0.7 is almost always that rather than a choice.
+    else if (version < 2 && saved.minimapOpacity === 0.7)
+        migrated.minimapOpacity = 1;
     return migrated;
 }
 
@@ -168,9 +169,14 @@ export class MinimapSettingTab extends PluginSettingTab {
         );
         this.addSlider(
             "Opacity",
-            "Change the minimap's opacity (0.05 - 1) - 0.05 leaves a barely visible ghost, 1 is solid",
+            "Change the minimap's opacity (0.05 - 1) - 1 is solid, lower values fade the whole minimap so the note shows through",
             "minimapOpacity",
             [0.05, 1, 0.01]
+        );
+        this.addToggle(
+            "Tint the minimap",
+            "Give the minimap a light wash of the theme's text colour, so it stands apart from the note. Off, it takes the note's own background",
+            "panelTint"
         );
         this.addSlider(
             "Slider opacity",

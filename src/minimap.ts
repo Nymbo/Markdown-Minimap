@@ -75,7 +75,8 @@ export class Minimap implements PointerHost {
     slider: HTMLDivElement | null = null;
     hitbox: HTMLDivElement | null = null;
     scale = 0.1;
-    minimapOpacity = 0.3;
+    minimapOpacity = 1;
+    panelTint = false;
     sliderOpacity = 0.3;
     sliderIdleOpacity = 0.09;
     topOffset = 0;
@@ -361,6 +362,7 @@ export class Minimap implements PointerHost {
     updateSettings(settings: MarkdownMinimapSettings) {
         this.scale = settings.scale;
         this.minimapOpacity = settings.minimapOpacity;
+        this.panelTint = settings.panelTint;
         this.sliderOpacity = settings.sliderOpacity;
         this.sliderIdleOpacity = settings.sliderIdleOpacity;
         this.topOffset = settings.topOffset;
@@ -370,16 +372,18 @@ export class Minimap implements PointerHost {
         this.reserveSpace = settings.reserveSpace;
         this.centerOnClick = settings.centerOnClick;
 
-        this.backgroundColor = this.panelTint();
+        this.backgroundColor = this.panelBackground();
 
         this.updateSettingsInCSS();
         void this.onResize();
     }
 
     /**
-     * The wash the panel is tinted with.
+     * The panel's background: the pane's own colour, or a wash when the tint is
+     * on.
      *
-     * The pane's own background colour is the wrong colour to tint with: the
+     * Untinted, the panel is a sheet of the pane's colour, which over the pane
+     * itself is invisible. The pane's colour is the wrong one to tint with: the
      * panel lies directly on top of it, and a colour blended with itself at any
      * alpha leaves it exactly as it was, so the setting had nothing to change.
      * A wash of the theme's text colour always contrasts with the pane behind
@@ -392,7 +396,8 @@ export class Minimap implements PointerHost {
      * theme that defines neither variable leaves the panel untinted instead of
      * painting it black, which is what reading a transparent colour produced.
      */
-    private panelTint(): string {
+    private panelBackground(): string {
+        if (!this.panelTint) return "var(--background-primary, transparent)";
         return "color-mix(in srgb, var(--text-normal, #888888) 15%, var(--background-primary, transparent))";
     }
 

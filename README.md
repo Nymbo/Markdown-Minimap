@@ -68,7 +68,8 @@ dragging it.
 | Disable on this device | Hides the minimap on this device only. Stored outside the synced settings file, so your phone and your desktop can disagree |
 | Enable by default | Whether new notes open with the minimap shown |
 | Scale | Size of the minimap, 0.05–0.3 of actual size |
-| Opacity | How solid the minimap is. 0.05 leaves a barely visible ghost, 1 is fully opaque |
+| Opacity | How solid the minimap is. 1 (the default) is fully opaque; lower values fade the whole minimap so the note shows through |
+| Tint the minimap | Off by default. Gives the minimap a light wash of the theme's text colour so it stands apart from the note |
 | Slider opacity | Viewport marker opacity while hovering the minimap; the dragging state scales from it |
 | Idle slider opacity | Viewport marker opacity the rest of the time; set it to 0 to hide the marker until you hover |
 | Top / bottom offset | Clearance for plugin toolbars or bottom chrome |
@@ -114,9 +115,9 @@ the pane's full width.
 background's. A background alpha leaves the map's text and images at full
 strength while the gaps between them go see-through, which reads as somebody
 else's block sitting over the note; `opacity` is the only property that reaches
-the rendered copy, since a background colour cannot touch its children. The
-panel is also tinted with a wash of the theme's text colour rather than with the
-pane's own background: the pane's colour is already behind it, and a colour
+the rendered copy, since a background colour cannot touch its children. It is
+solid by default. The optional tint is a wash of the theme's text colour rather
+than of the pane's own background: the pane's colour is already behind it, and a colour
 blended with itself is itself at any alpha, which is what made the setting look
 broken — the slider moved and nothing changed. A text-colour wash contrasts
 either way round, paler on a dark theme and darker on a light one, so the panel
