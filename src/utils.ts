@@ -24,6 +24,7 @@ export function pixels(this: void, value: string | undefined): number {
 export function toPx(this: void, value: number): string {
     return `${Math.round(value * 100) / 100}px`;
 }
+
 export function clamp(this: void, value: number, min: number, max: number) {
     return Math.max(min, Math.min(value, max));
 }

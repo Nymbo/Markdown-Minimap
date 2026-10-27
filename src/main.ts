@@ -4,6 +4,7 @@ import {
     MinimapSettingTab,
     getDefaultSettings,
     isSettingsObject,
+    migrateSettings,
 } from "./settings";
 import type { MarkdownMinimapSettings } from "./settings";
 import { sleep, throttle } from "./utils";
@@ -220,10 +221,13 @@ export default class NoteMinimap extends Plugin {
 
     async loadSettings() {
         const savedSettings: unknown = await this.loadData();
-        this.settings = Object.assign(
-            getDefaultSettings(),
-            isSettingsObject(savedSettings)
-        );
+        const saved = isSettingsObject(savedSettings);
+        // A fresh install has nothing saved and takes the defaults as they are.
+        const migrated = savedSettings ? migrateSettings(saved) : null;
+        this.settings = Object.assign(getDefaultSettings(), migrated ?? saved);
+        // Saved once so the migration runs once: a later change of the same
+        // setting by hand has to stick.
+        if (migrated) await this.saveData(this.settings);
     }
 
     /**

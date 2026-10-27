@@ -13,7 +13,15 @@ export interface MarkdownMinimapSettings {
     minViewportHeight: number;
     reserveSpace: boolean;
     centerOnClick: boolean;
+    /** Which of the migrations below the saved settings have been through. */
+    settingsVersion: number;
 }
+
+/**
+ * Bumped whenever a saved setting changes meaning. Settings saved before the
+ * field existed read as version 0.
+ */
+const SETTINGS_VERSION = 1;
 
 export function getDefaultSettings(this: void): MarkdownMinimapSettings {
     return {
@@ -36,7 +44,34 @@ export function getDefaultSettings(this: void): MarkdownMinimapSettings {
         // run underneath it is the wrong thing to do unasked.
         reserveSpace: true,
         centerOnClick: true,
+        settingsVersion: SETTINGS_VERSION,
     };
+}
+
+/**
+ * Brings settings saved by an older version up to date, or returns null when
+ * there is nothing to change.
+ *
+ * Saving writes every setting, not just the ones changed, so a new default
+ * never reaches anyone who has saved once: it has to be carried over here.
+ */
+export function migrateSettings(
+    this: void,
+    saved: Partial<MarkdownMinimapSettings>
+): Partial<MarkdownMinimapSettings> | null {
+    if ((saved.settingsVersion ?? 0) >= SETTINGS_VERSION) return null;
+    const migrated = { ...saved, settingsVersion: SETTINGS_VERSION };
+    // Version 1: Opacity fades the whole panel rather than only its
+    // background. The old value faded a background drawn over its own colour,
+    // so it changed nothing on screen; read as the new opacity, the old default
+    // of 0.3 is close to invisible. Raised to the new default, which is meant
+    // to look like the old one did.
+    if (
+        typeof saved.minimapOpacity === "number" &&
+        saved.minimapOpacity < 0.7
+    )
+        migrated.minimapOpacity = 0.7;
+    return migrated;
 }
 
 export function isSettingsObject(
