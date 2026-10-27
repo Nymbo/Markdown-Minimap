@@ -115,10 +115,7 @@ function appendToken(
         parent.appendChild(activeDocument.createTextNode(text));
         return;
     }
-    const span = activeDocument.createElement("span");
-    span.className = cls;
-    span.textContent = text;
-    parent.appendChild(span);
+    parent.createSpan({ cls, text });
 }
 
 /**

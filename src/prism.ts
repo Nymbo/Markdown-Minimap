@@ -137,7 +137,7 @@ export function highlightCode(
     if (!grammar || typeof grammar !== "object") return null;
 
     try {
-        const tokens = prism.tokenize(code, grammar as object);
+        const tokens = prism.tokenize(code, grammar);
         const runs: CodeRun[] = [];
         flattenTokens(tokens, null, runs);
         return splitRunsIntoLines(runs);
@@ -159,11 +159,12 @@ let warming: Promise<void> | null = null;
  */
 export function warmPrism(this: void, app: App): Promise<void> {
     if (getPrism()) return Promise.resolve();
-    if (!warming) {
+    if (warming === null) {
         warming = (async () => {
             const component = new Component();
             component.load();
-            const host = activeDocument.createElement("div");
+            // Never attached, so which window's document it belongs to is moot.
+            const host = createDiv();
             try {
                 await MarkdownRenderer.render(
                     app,

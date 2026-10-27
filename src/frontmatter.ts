@@ -166,9 +166,11 @@ export function renderFrontmatter(
         }
     }
 
-    const wrapper = activeDocument.createElement("div");
-    wrapper.className = "markdown-minimap-properties";
-    wrapper.setAttribute("aria-hidden", "true");
+    // Moved to the front once filled; see the end of this function.
+    const wrapper = rendered.createDiv({
+        cls: "markdown-minimap-properties",
+        attr: { "aria-hidden": "true" },
+    });
     // Only pin the height when the note could actually be measured. A pane that
     // is hidden or has not rendered yet measures 0, and forcing that would
     // erase the properties instead of reserving their space.

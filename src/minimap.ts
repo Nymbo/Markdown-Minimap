@@ -34,7 +34,7 @@ import {
 import type { ScrollMetrics } from "./scroll-model";
 import type { MarkdownMinimapSettings } from "./settings";
 import type NoteMinimap from "./main";
-import { clamp, computedStyle, pixels } from "./utils";
+import { clamp, computedStyle } from "./utils";
 
 /**
  * A section of the note as drawn in the panel, kept so that an edit elsewhere
@@ -176,9 +176,9 @@ export class Minimap implements PointerHost {
             )
             .forEach((e) => e.remove());
 
-        const container = activeDocument.createElement("div");
-        container.className = "minimap-container";
+        const container = this.element.createDiv({ cls: "minimap-container" });
         this.container = container;
+        // Ahead of the note rather than after it, where createDiv puts it.
         this.element.prepend(container);
 
         // The panel is positioned by this wrapper and rendered by the element
@@ -196,25 +196,22 @@ export class Minimap implements PointerHost {
         // Obsidian is free to style. The wrapper carries a name nothing else
         // targets, and the rendered element inside it is in normal flow with no
         // offsets of its own, so a rule that moves it has nothing to move.
-        this.viewport = activeDocument.createElement("div");
-        this.viewport.className = "minimap-viewport";
-        container.appendChild(this.viewport);
+        this.viewport = container.createDiv({ cls: "minimap-viewport" });
 
-        this.content = activeDocument.createElement("div");
         // "show-properties" is what re-enables Obsidian's own rule for the
         // properties widget; rendered Markdown hides it by default, so without
         // this the cloned properties collapse to zero height and render blank.
-        this.content.className =
-            "minimap-content markdown-preview-view markdown-rendered show-properties";
-        this.viewport.appendChild(this.content);
+        this.content = this.viewport.createDiv({
+            cls: [
+                "minimap-content",
+                "markdown-preview-view",
+                "markdown-rendered",
+                "show-properties",
+            ],
+        });
 
-        this.slider = activeDocument.createElement("div");
-        this.slider.className = "minimap-slider";
-        container.appendChild(this.slider);
-
-        this.hitbox = activeDocument.createElement("div");
-        this.hitbox.className = "minimap-hitbox";
-        container.appendChild(this.hitbox);
+        this.slider = container.createDiv({ cls: "minimap-slider" });
+        this.hitbox = container.createDiv({ cls: "minimap-hitbox" });
     }
 
     /**
@@ -989,9 +986,10 @@ export class Minimap implements PointerHost {
             this.isReadModeActive()
         );
         if (!inlineTitle || inlineTitle.offsetHeight <= 0) return;
-        const title = activeDocument.createElement("div");
-        title.className = "inline-title minimap-inline-title";
-        title.textContent = basename;
+        const title = this.content.createDiv({
+            cls: ["inline-title", "minimap-inline-title"],
+            text: basename,
+        });
         this.content.prepend(title);
     }
 
@@ -1041,7 +1039,7 @@ export class Minimap implements PointerHost {
      * sees everything each of them asked about.
      */
     onResize(): Promise<void> {
-        if (this.pendingRemeasure) return this.pendingRemeasure;
+        if (this.pendingRemeasure !== null) return this.pendingRemeasure;
         this.pendingRemeasure = new Promise<void>((resolve) => {
             // Wait for Obsidian's editor layout pass before measuring scroll
             // dimensions; immediate reads can be stale after mode or pane

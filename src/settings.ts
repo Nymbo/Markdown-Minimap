@@ -78,9 +78,7 @@ export function isSettingsObject(
     this: void,
     value: unknown
 ): Partial<MarkdownMinimapSettings> {
-    return value && typeof value === "object"
-        ? (value as Partial<MarkdownMinimapSettings>)
-        : {};
+    return value && typeof value === "object" ? value : {};
 }
 
 export class MinimapSettingTab extends PluginSettingTab {
