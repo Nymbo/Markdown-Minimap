@@ -40,6 +40,14 @@ export function resolveDocumentHeights(
     };
 }
 
+/**
+ * How far either side of the viewport the thumb's height is averaged, in
+ * screens, as far as the editor has measured. Wide enough that one tall block
+ * barely moves it, narrow enough that it still tracks a long stretch drawn
+ * denser or sparser than the editor.
+ */
+const THUMB_REACH = 2;
+
 export interface ScrollMetricsInput {
     clientHeight: number;
     scrollHeight: number;
@@ -57,6 +65,11 @@ export interface ScrollMetricsInput {
      * sections can support.
      */
     mapToMinimap: ((editorY: number) => number) | null;
+    /**
+     * The stretch of the editor's scroll space whose heights it has measured
+     * rather than estimated, or null when that doesn't matter.
+     */
+    measuredRange?: [number, number] | null;
 }
 
 export interface ScrollMetrics {
@@ -68,7 +81,9 @@ export interface ScrollMetrics {
     docScale: number;
     minimapScrollOffset: number;
     sliderHeight: number;
+    /** The thumb's top in panel pixels, before the panel's own pan. */
     mappedTop: number;
+    /** The thumb's height before clamping, averaged as described above. */
     viewportExtent: number;
     usedAnchors: boolean;
 }
@@ -93,15 +108,48 @@ export function computeScrollMetrics(
     const docScale = scaledDocumentHeight / input.effectiveScrollHeight;
 
     const map = input.mapToMinimap;
-    const mappedTop = map
-        ? map(scrollTop) * input.scale
-        : scrollTop * docScale;
-    const mappedBottom = map
-        ? map(scrollTop + clientHeight) * input.scale
-        : (scrollTop + clientHeight) * docScale;
-    // The thumb covers exactly the slice of the note the viewport shows, which
-    // varies with content density once the mapping is piecewise.
-    const viewportExtent = Math.max(1, mappedBottom - mappedTop);
+    const toPanel = (editorY: number) =>
+        map ? map(editorY) * input.scale : editorY * docScale;
+    const viewTop = toPanel(scrollTop);
+    const viewBottom = toPanel(scrollTop + clientHeight);
+
+    // The thumb's height follows how densely the panel draws the note, but
+    // averaged over the screens around the viewport rather than read from the
+    // viewport alone. Wherever the panel and the editor lay a block out
+    // differently — an embed, a table, HTML that Reading view and Live Preview
+    // disagree about — the viewport's own slice of the panel grows and shrinks
+    // as it passes, and a thumb sized to it stretched and squashed under the
+    // pointer. Averaged, it changes too slowly to see.
+    //
+    // Only over what the editor has measured, though. Past the lines it has
+    // rendered its heights are estimates — an image it hasn't displayed is a
+    // fraction of its real height — and an average reaching into them would
+    // move as each one is measured, which is the stutter over again.
+    const reach = clientHeight * THUMB_REACH;
+    const measured = input.measuredRange ?? [0, input.effectiveScrollHeight];
+    const from = Math.min(
+        scrollTop,
+        Math.max(0, scrollTop - reach, measured[0])
+    );
+    const to = Math.max(
+        scrollTop + clientHeight,
+        Math.min(
+            input.effectiveScrollHeight,
+            scrollTop + clientHeight + reach,
+            measured[1]
+        )
+    );
+    const viewportExtent = Math.max(
+        1,
+        ((toPanel(to) - toPanel(from)) * clientHeight) / Math.max(1, to - from)
+    );
+    // Then placed within the viewport's slice of the panel: at its top when
+    // the note is scrolled to the top, at its bottom when scrolled to the end,
+    // and sliding between the two in between. Both ends stay exact, and the
+    // thumb always sits over what is on screen.
+    const travel = maxScroll > 0 ? scrollTop / maxScroll : 0;
+    const mappedTop =
+        viewTop + (viewBottom - viewTop - viewportExtent) * travel;
 
     const rawActiveHeight = Math.min(availableHeight, scaledDocumentHeight);
     const sliderHeight = Math.max(

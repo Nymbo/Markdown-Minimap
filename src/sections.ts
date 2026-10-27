@@ -148,6 +148,62 @@ export function findSectionStarts(
 }
 
 /**
+ * A line that opens an HTML block running to the next blank line — CommonMark
+ * types 6 and 7. `<script>`, `<pre>`, `<style>` and `<textarea>`, comments and
+ * the other types end on a marker of their own instead, so nothing after them
+ * is swallowed.
+ */
+const HTML_BLOCK_OPEN =
+    /^ {0,3}<\/?(?!(?:script|pre|style|textarea)(?:[\s/>]|$))[A-Za-z][A-Za-z0-9-]*(?:[\s/>]|$)/i;
+
+/**
+ * Lines Live Preview starts a new block at even directly under HTML: a code
+ * fence, an ATX heading, a quote or a list item.
+ */
+const LIVE_BLOCK_START =
+    /^ {0,3}(?:`{3,}|~{3,}|#{1,6}(?:[ \t]|$)|>|[-+*][ \t]|\d{1,9}[.)][ \t])/;
+
+/**
+ * Lines that end an HTML block in Live Preview but not in Reading view.
+ *
+ * Markdown runs an HTML block on to the next blank line, so a code fence, a
+ * heading, a list or a quote written straight under one becomes part of the
+ * HTML — Reading view draws a fenced example of an `<iframe>` as a second,
+ * live iframe. Live Preview starts a new block at each of those instead. The
+ * panel renders through the same renderer as Reading view, so in Live Preview
+ * it is handed a blank line before each of these, and draws the note the way
+ * the editor does.
+ */
+export function findLiveHtmlBreaks(
+    this: void,
+    lines: string[],
+    protectedLines: boolean[]
+): boolean[] {
+    const breaks = lines.map(() => false);
+    let inHtml = false;
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
+        const opensFence =
+            protectedLines[index] &&
+            (index === 0 || !protectedLines[index - 1]);
+        if (
+            inHtml &&
+            (opensFence ||
+                (!protectedLines[index] && LIVE_BLOCK_START.test(line)))
+        ) {
+            breaks[index] = true;
+            inHtml = false;
+        }
+        if (protectedLines[index] || line.trim() === "") {
+            inHtml = false;
+            continue;
+        }
+        if (!inHtml && HTML_BLOCK_OPEN.test(line)) inHtml = true;
+    }
+    return breaks;
+}
+
+/**
  * An image embed in either form Obsidian draws as an attachment:
  * `![[picture.png|300]]`, or `![alt](picture.png)`. Group 1 is a wikilink
  * target; group 2 a Markdown link target in angle brackets, which may hold
@@ -209,18 +265,31 @@ export function collectImageEmbeds(
  */
 export function prepareSections(
     this: void,
-    markdown: string
+    markdown: string,
+    /** Draw HTML blocks the way Live Preview does; see `findLiveHtmlBreaks`. */
+    livePreview = false
 ): SectionedNote {
     const newline = markdown.includes("\r\n") ? "\r\n" : "\n";
     const lines = markdown.split(/\r?\n/);
     const protectedLines = getProtectedLines(lines);
     const starts = findSectionStarts(lines, protectedLines);
+    // The blank line rides on the front of the line it precedes, so every
+    // line keeps its number for the blank-line markers and the anchors.
+    let rendered = lines;
+    if (livePreview) {
+        const breaks = findLiveHtmlBreaks(lines, protectedLines);
+        if (breaks.includes(true)) {
+            rendered = lines.map((line, index) =>
+                breaks[index] ? newline + line : line
+            );
+        }
+    }
 
     const sections: RenderSection[] = starts.map((start, index) => {
         const last = index === starts.length - 1;
         const end = last ? lines.length : starts[index + 1];
         const collapsed = collapseBlankLines(
-            lines.slice(start, end),
+            rendered.slice(start, end),
             protectedLines.slice(start, end),
             last
         );

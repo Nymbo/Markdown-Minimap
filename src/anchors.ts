@@ -28,6 +28,9 @@ const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
 const BLOCK_OPENER =
     /^ {0,3}(?:>|[-+*](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|#{1,6}(?:[ \t]|$)|<)/;
 
+/** Three or more `*`, `-` or `_` alone on a line, optionally spaced. */
+const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+
 /** Heading source lines and their levels, in document order. */
 export interface HeadingIndex {
     /** Source line numbers, 1-based. */
@@ -42,6 +45,9 @@ function isParagraphText(this: void, text: string): boolean {
     // Four spaces in is either indented code or a list item's continuation;
     // either way the line belongs to a block that already started.
     if (/^ {4}/.test(text)) return false;
+    // A horizontal rule is a block of its own, so `***` over `---` is two
+    // rules, not a heading.
+    if (THEMATIC_BREAK.test(text)) return false;
     return !BLOCK_OPENER.test(text);
 }
 

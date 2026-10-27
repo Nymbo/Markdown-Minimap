@@ -156,6 +156,13 @@ don't hang off a heading, such as a list item, aren't mirrored in the rendered
 modes; Source mode takes every line's height from CodeMirror, so it follows all
 of them exactly.
 
+**HTML in Live Preview.** Markdown runs an HTML block on to the next blank line,
+so a code fence, heading, list or quote written directly under an HTML element
+becomes part of it — Reading view draws a fenced example of an `<iframe>` as a
+second, live iframe. Live Preview starts a new block there instead. In Live
+Preview the panel does the same, so it draws what the editor shows; in Reading
+view it keeps drawing what Reading view shows.
+
 **The full scroll range.** Obsidian lets you scroll past the end of a note, and
 its own scrollbar covers that space. The minimap mirrors it rather than leaving
 it out, so the marker reaches the end of its track exactly when the editor does
@@ -214,6 +221,15 @@ put at the top, with **Center on click** off) and the marker moves to it — it 
 longer ends up under the pointer the way a
 scrollbar's thumb would. Keep the button down and the rest of the gesture is an
 ordinary marker drag, held from wherever the marker landed.
+
+**A steady marker.** The marker's height is how much of the panel one screen of
+the note takes up, averaged over the couple of screens around it rather than
+read from the screen alone. Wherever the panel and the editor lay a block out
+differently, a marker sized to the screen alone stretched and squashed as it
+passed. The average only reaches as far as the editor has actually measured —
+beyond that its heights are estimates, which would move it again. The marker is
+placed within the screen's part of the panel so that it meets the top of its
+track at the top of the note and the bottom at the end.
 
 ## 🛠️ Development
 
