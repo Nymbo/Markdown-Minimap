@@ -86,11 +86,14 @@ and shifts by half their difference, so the two come out equal at any zoom, font
 size or screen. There is no number to type in and no unit to get wrong.
 
 The text moves into the file margin as well as the readable line length margin,
-and it is never pushed past the pane's own left edge. On a narrow pane there may
-not be enough room to make the gaps fully equal; the text moves as far as it can
-without being clipped, so it can still end up partly under the minimap. A wider
-pane, `Settings` → `Editor` → `Readable line length`, or a smaller **Scale**
-each give it more to work with.
+and it is never pushed past the pane's own left edge. It stops short of that
+edge by about sixteen pixels, so the note keeps a visible left margin: the shift
+is capped at the margin that exists, and taking all of it left the text flush
+against the pane, which reads as the note having lost its left side. On a narrow
+pane there may not be enough room to make the gaps fully equal; the text moves as
+far as it can, so it can still end up partly under the minimap. A wider pane,
+`Settings` → `Editor` → `Readable line length`, or a smaller **Scale** each give
+it more to work with.
 
 Thanks to [@2590812378](https://github.com/Nymbo/Markdown-Minimap/issues/3) for
 suggesting this, originally as a CSS snippet, and for the follow-ups that led to

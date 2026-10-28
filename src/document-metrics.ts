@@ -126,6 +126,18 @@ function measureTextWidth(
 }
 
 /**
+ * Left margin the note keeps whatever the shift works out to.
+ *
+ * The shift is capped at the gap that exists, which is the file margin, so
+ * without a floor it takes the whole of it: the text starts flush against the
+ * pane's edge and the note reads as having lost its left side. The floor costs
+ * nothing in exchange — on any pane wide enough to matter the strip is far
+ * wider than the margin, so the last sixteen pixels were never what decided
+ * whether the text ran under it.
+ */
+const MINIMUM_LEFT_GAP = 16;
+
+/**
  * How far the note's text should move so the space either side of it looks
  * even once the minimap has taken its strip.
  *
@@ -146,13 +158,23 @@ function measureTextWidth(
  * scroller's padding, so the two right edges do not coincide.
  *
  * Clamped to the gap that actually exists, so the text can never be pushed off
- * the pane's left edge and clipped.
+ * the pane's left edge and clipped — minus a floor, so it does not end up
+ * sitting exactly on that edge either.
+ *
+ * The floor is measured from the sizer's own margin (`base`), not from the
+ * centring worked out above. Those are not the same number: the line a width is
+ * read from sits beside the gutter, so it is narrower than the sizer by the
+ * gutter's width and its centring is correspondingly wider. Taking the floor
+ * from that over-estimate let the sizer start half a gutter to the left of where
+ * the arithmetic thought it was — negative — which cut the first characters off
+ * every line that begins at the sizer's edge, the inline title among them.
  */
 function reserveShift(
     this: void,
     scroller: HTMLElement | null,
     textWidth: number,
-    stripLeft: number
+    stripLeft: number,
+    base: number
 ): number {
     if (!scroller || textWidth <= 0 || stripLeft <= 0) return 0;
     const style = computedStyle(scroller);
@@ -169,7 +191,13 @@ function reserveShift(
     const centring = Math.max(0, (available - textWidth) / 2);
     const leftGap = paddingLeft + centring;
     const rightGap = stripLeft - (innerRight - paddingRight - centring);
-    return clamp((leftGap - rightGap) / 2, 0, leftGap);
+    // How far the sizer can move before its own left edge crosses the floor.
+    const room = paddingLeft + base;
+    return clamp(
+        (leftGap - rightGap) / 2,
+        0,
+        Math.max(0, room - MINIMUM_LEFT_GAP)
+    );
 }
 
 /**
@@ -228,9 +256,8 @@ function baseSizerMargin(
 function applyContentShift(
     this: void,
     element: HTMLElement,
-    scroller: HTMLElement | null,
-    sizer: HTMLElement | null,
-    shift: number
+    shift: number,
+    base: number
 ): void {
     if (shift <= 0) {
         element.style.removeProperty("--minimap-content-shift");
@@ -239,7 +266,6 @@ function applyContentShift(
         element.classList.remove(SHIFTED_CLASS);
         return;
     }
-    const base = baseSizerMargin(element, scroller, sizer);
     element.style.setProperty("--minimap-content-shift", toPx(shift));
     element.style.setProperty(
         "--minimap-sizer-margin-left",
@@ -339,10 +365,13 @@ export function mirrorDocumentMetrics(
     // once the measurement landed, which is what the shift looked like moving.
     // Treated as unmeasurable instead, the last shift simply stands.
     if (options.stripLeft > 0 || !options.reserveSpace) {
+        // Measured once and handed to both: the shift is capped against this
+        // margin, and this is the margin the sizer is then given.
+        const base = baseSizerMargin(element, scroller, sizer);
         const shift = options.reserveSpace
-            ? reserveShift(scroller, textWidth, options.stripLeft)
+            ? reserveShift(scroller, textWidth, options.stripLeft, base)
             : 0;
-        applyContentShift(element, scroller, sizer, shift);
+        applyContentShift(element, shift, base);
     }
 
     // Themes commonly scope line height to selectors the panel does not match,
