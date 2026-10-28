@@ -1032,8 +1032,56 @@ export class Minimap implements PointerHost {
     settleAfterScroll = () => {
         if (this.isRawSourceMode()) this.refreshSourceLineHeights();
         this.checkFolds();
+        this.settleJump();
         this.updateSliderScroll();
     };
+
+    /**
+     * Put a click's target exactly on the line it asked for, once the editor
+     * has finished measuring.
+     *
+     * `scrollIntoView` aims with the height map it has: for the stretch below
+     * the viewport those are estimates, and an image it has not drawn yet is a
+     * fraction of its height. The target therefore lands hundreds of pixels
+     * below the top — still on screen, so CodeMirror is satisfied — and the
+     * measurements that arrive afterwards do not move it back. Now that the
+     * target and everything above it have been measured, one correction puts it
+     * where the click asked.
+     */
+    private pendingJump: { pos: number; center: boolean; passes: number; until: number } | null =
+        null;
+
+    private settleJump() {
+        const jump = this.pendingJump;
+        if (!jump) return;
+        if (Date.now() > jump.until || jump.passes >= 3) {
+            this.pendingJump = null;
+            return;
+        }
+        const scroller = this.getScroller();
+        const view = this.getEditorView();
+        if (!scroller || !view) {
+            this.pendingJump = null;
+            return;
+        }
+        const block = view.lineBlockAt(jump.pos);
+        const top = block.top + this.getEditorContentOffset();
+        const wanted = jump.center
+            ? top - (scroller.clientHeight - block.height) / 2
+            : top;
+        const maxScroll = Math.max(
+            0,
+            scroller.scrollHeight - scroller.clientHeight
+        );
+        const delta =
+            clamp(wanted, 0, maxScroll) - Math.round(scroller.scrollTop);
+        if (Math.abs(delta) <= 1) {
+            this.pendingJump = null;
+            return;
+        }
+        jump.passes++;
+        scroller.scrollTop = clamp(scroller.scrollTop + delta, 0, maxScroll);
+    }
 
     /**
      * Schedule a measuring pass. Requests arriving while one is already pending
@@ -1247,6 +1295,15 @@ export class Minimap implements PointerHost {
                 y: center ? "center" : "start",
             }),
         });
+        // The editor measures the stretch it just jumped into before the click
+        // can be judged; put the target exactly where it was asked for once
+        // that has happened.
+        this.pendingJump = {
+            pos,
+            center,
+            passes: 0,
+            until: Date.now() + 2500,
+        };
         return true;
     }
 
