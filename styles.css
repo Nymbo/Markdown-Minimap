@@ -298,3 +298,19 @@
     margin-left: var(--minimap-sizer-margin-left, auto);
     margin-right: var(--minimap-sizer-margin-right, auto);
 }
+
+/* CodeMirror pins its gutter to the scrollport with `position: sticky`, so the
+   negative margin above slides the text out from under a gutter that stays put:
+   any marker living there then sits on the line's first characters — a heading
+   level badge ends up inside the heading text. Give the before-gutter the same
+   offset and the two move together again. Only the before-gutter: the after one
+   is pinned with `inset-inline-end`, and an offset on its other side would
+   stretch it across the whole line. Both the physical and the logical property
+   are written because CodeMirror declares the logical one, and which of the two
+   wins the cascade is not worth depending on. */
+.minimap-content-shifted:not(.minimap-disabled)
+    .markdown-source-view.mod-cm6
+    .cm-gutters-before {
+    left: calc(-1 * var(--minimap-content-shift, 0px));
+    inset-inline-start: calc(-1 * var(--minimap-content-shift, 0px));
+}
