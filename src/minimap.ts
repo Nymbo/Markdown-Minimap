@@ -37,6 +37,18 @@ import type NoteMinimap from "./main";
 import { clamp, computedStyle } from "./utils";
 
 /**
+ * Input that means the reader is moving the note themselves: the wheel, a
+ * touch, a press on the text or its scrollbar, and the keyboard. The minimap's
+ * own track is outside the scroller, so clicking it is not among them.
+ */
+const READER_INPUT_EVENTS = [
+    "wheel",
+    "touchstart",
+    "pointerdown",
+    "keydown",
+] as const;
+
+/**
  * A section of the note as drawn in the panel, kept so that an edit elsewhere
  * in the note can leave it exactly as it is.
  */
@@ -338,7 +350,7 @@ export class Minimap implements PointerHost {
         window.clearTimeout(this.foldCheckTimer);
         this.foldObserver?.disconnect();
         this.foldObserver = null;
-        this.scroller?.removeEventListener("scroll", this.onScroll);
+        this.listenToScroller(false);
         this.pointer.detach(this.hitbox);
 
         this.clearSections();
@@ -495,11 +507,29 @@ export class Minimap implements PointerHost {
     syncScroller() {
         const next = this.getExpectedScroller();
         if (next === this.scroller) return;
-        this.scroller?.removeEventListener("scroll", this.onScroll);
+        this.listenToScroller(false);
         this.scroller = next;
         if (this.scroller) {
-            this.scroller.addEventListener("scroll", this.onScroll);
+            this.listenToScroller(true);
             void this.onResize();
+        }
+    }
+
+    private listenToScroller(on: boolean) {
+        const scroller = this.scroller;
+        if (!scroller) return;
+        if (on) scroller.addEventListener("scroll", this.onScroll);
+        else scroller.removeEventListener("scroll", this.onScroll);
+        for (const type of READER_INPUT_EVENTS) {
+            if (on)
+                scroller.addEventListener(type, this.cancelJump, {
+                    capture: true,
+                    passive: true,
+                });
+            else
+                scroller.removeEventListener(type, this.cancelJump, {
+                    capture: true,
+                });
         }
     }
 
@@ -1062,6 +1092,15 @@ export class Minimap implements PointerHost {
         corrections: number;
         until: number;
     } | null = null;
+
+    /**
+     * The reader has taken the scroll back. A scroll event cannot say who
+     * moved the view, so without this a scroll in the second after a click was
+     * read as the jump landing short and pulled back to the clicked line.
+     */
+    private readonly cancelJump = () => {
+        this.pendingJump = null;
+    };
 
     private scheduleJumpCorrection(pos: number, center: boolean) {
         this.pendingJump = {
