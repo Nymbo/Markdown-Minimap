@@ -1047,17 +1047,44 @@ export class Minimap implements PointerHost {
      * measurements that arrive afterwards do not move it back. Now that the
      * target and everything above it have been measured, one correction puts it
      * where the click asked.
+     *
+     * Corrected early and often rather than once when the scrolling settles:
+     * the settle is a third of a second after the jump, so a single correction
+     * there reads as the view landing somewhere and then moving again. The
+     * passes below start while the jump is still settling, close enough that the
+     * correction looks like part of the same movement — and a correction that no
+     * longer has anything to do, because the map has settled by itself, leaves
+     * the scroll alone.
      */
-    private pendingJump: { pos: number; center: boolean; passes: number; until: number } | null =
-        null;
+    private pendingJump: {
+        pos: number;
+        center: boolean;
+        corrections: number;
+        until: number;
+    } | null = null;
+
+    private scheduleJumpCorrection(pos: number, center: boolean) {
+        this.pendingJump = {
+            pos,
+            center,
+            corrections: 0,
+            until: Date.now() + 1200,
+        };
+        for (const delay of [60, 160, 320]) {
+            window.setTimeout(() => this.settleJump(), delay);
+        }
+    }
 
     private settleJump() {
         const jump = this.pendingJump;
         if (!jump) return;
-        if (Date.now() > jump.until || jump.passes >= 3) {
+        if (Date.now() > jump.until || jump.corrections >= 3) {
             this.pendingJump = null;
             return;
         }
+        // A gesture owns the scroll while it lasts; correcting under it would
+        // fight the pointer for the same position.
+        if (this.pointer.isDragging()) return;
         const scroller = this.getScroller();
         const view = this.getEditorView();
         if (!scroller || !view) {
@@ -1075,11 +1102,14 @@ export class Minimap implements PointerHost {
         );
         const delta =
             clamp(wanted, 0, maxScroll) - Math.round(scroller.scrollTop);
-        if (Math.abs(delta) <= 1) {
+        if (Math.abs(delta) <= 1) return;
+        // Further than a screen from where the jump left it: the reader has
+        // scrolled somewhere else, and pulling them back is not a correction.
+        if (Math.abs(delta) > scroller.clientHeight) {
             this.pendingJump = null;
             return;
         }
-        jump.passes++;
+        jump.corrections++;
         scroller.scrollTop = clamp(scroller.scrollTop + delta, 0, maxScroll);
     }
 
@@ -1298,12 +1328,7 @@ export class Minimap implements PointerHost {
         // The editor measures the stretch it just jumped into before the click
         // can be judged; put the target exactly where it was asked for once
         // that has happened.
-        this.pendingJump = {
-            pos,
-            center,
-            passes: 0,
-            until: Date.now() + 2500,
-        };
+        this.scheduleJumpCorrection(pos, center);
         return true;
     }
 

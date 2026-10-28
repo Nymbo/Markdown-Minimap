@@ -37,6 +37,11 @@ export class MinimapPointer {
     private readonly host: PointerHost;
     private dragging = false;
     private dragMode: DragMode = "document";
+
+    /** Whether a gesture is in progress, which owns the scroll until it ends. */
+    isDragging() {
+        return this.dragging;
+    }
     /**
      * Where the thumb was grabbed, as a fraction of its height. The thumb
      * resizes as it moves, because its height is the slice of the note the
